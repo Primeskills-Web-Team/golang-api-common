@@ -28,14 +28,15 @@ var Descriptions = map[string]string{
 }
 
 var HttpCode = map[string]int{
-	"000": 200,
-	"021": 201,
-	"022": 200,
-	"041": 401,
-	"047": 401,
-	"043": 403,
-	"042": 422,
-	"044": 404,
-	"046": 404,
-	"095": 504,
+	Success:              200,
+	SuccessCreate:        201,
+	SuccessUpdate:        200,
+	FailedAuthenticate:   401,
+	FailedAuthorization:  401,
+	ForbiddenAccess:      403,
+	FailedValidationForm: 422,
+	RouteNotFound:        404,
+	DataNotFound:         404,
+	Timeout:              504,
+	GeneralError:         500,
 }
