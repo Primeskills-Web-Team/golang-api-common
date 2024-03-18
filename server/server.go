@@ -12,11 +12,27 @@ import (
 	"strconv"
 )
 
-func Run(port string, resource string) {
+func defaultConfig() (string, string) {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	resource := os.Getenv("APP_NAME")
+	return port, resource
+}
+
+func Run() {
+	port, resource := defaultConfig()
 	if port == "" {
 		log.Fatalln("Port is undefined, please setup your port")
 	}
 	RunDefaultServer(port, resource, nil)
+}
+
+func InitServer(routes func(e *gin.Engine)) {
+	port, resource := defaultConfig()
+	RunDefaultServer(port, resource, routes)
 }
 
 func RunDefaultServer(port string, resource string, routes func(e *gin.Engine)) {
@@ -39,7 +55,7 @@ func RunDefaultServer(port string, resource string, routes func(e *gin.Engine)) 
 func heartbeat(port string) {
 	logrus.Infoln("Register to eureka")
 	portInt, _ := strconv.Atoi(port)
-	client := eureka.NewClient(&eureka.Config{
+	eurekaConfig := eureka.Config{
 		DefaultZone:           os.Getenv("SERVICE_DISCOVERY_URL"),
 		App:                   os.Getenv("APP_NAME"),
 		Port:                  portInt,
@@ -53,6 +69,16 @@ func heartbeat(port string) {
 			"PRODUCT_ENV_CODE":     "DEFAULT",
 			"SERVICE_VERSION_CODE": "DEFAULT",
 		},
-	})
+	}
+
+	if os.Getenv("HOST_NAME_APP") != "" {
+		eurekaConfig.HostName = os.Getenv("HOST_NAME_APP")
+	}
+
+	if os.Getenv("IP_APP") != "" {
+		eurekaConfig.IP = os.Getenv("IP_APP")
+	}
+
+	client := eureka.NewClient(&eurekaConfig)
 	client.Start()
 }

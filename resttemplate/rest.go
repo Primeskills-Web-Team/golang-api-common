@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/Primeskills-Web-Team/golang-api-common/exception"
+	"github.com/sirupsen/logrus"
 	"io/ioutil"
+	"mime/multipart"
 	"net/http"
 	"strings"
 )
@@ -15,6 +17,7 @@ type RestTemplate interface {
 	PostWithHeaders(url string, body interface{}, headers map[string]string) []byte
 	Get(url string) []byte
 	GetWithAuthorization(url string, header map[string]string) []byte
+	PostMultipart(url string, body *bytes.Buffer, writer *multipart.Writer) []byte
 }
 
 type RestTemplateStruct struct {
@@ -94,6 +97,49 @@ func (r RestTemplateStruct) Get(url string) []byte {
 	if errParse != nil {
 		panic(exception.NewInternalServerError(fmt.Sprintf("An Error Occured %v", err)))
 	}
+	return bodyResp
+}
+
+type ContentFile struct {
+	FileName  string
+	File      []byte
+	FieldName string
+}
+
+func (r RestTemplateStruct) PostMultipart(url string, body *bytes.Buffer, writer *multipart.Writer) []byte {
+	logrus.Infoln(url)
+
+	// Create a new HTTP request
+	req, err := http.NewRequest("POST", url, body)
+	if err != nil {
+		panic(exception.NewInternalServerError(fmt.Sprintf("An Error Occured %v", err)))
+	}
+
+	// Set the content type to multipart; this is crucial for file uploads
+	req.Header.Set("X-AI_TOKEN", "AI-674ceb4b6fd801527167dd2f")
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("X-REQUEST_FROM", "AI_TOKEN")
+
+	// Perform the request
+	client := &http.Client{}
+	respRequest, err := client.Do(req)
+	if err != nil {
+		panic(exception.NewInternalServerError(fmt.Sprintf("An Error Occured %v", err)))
+	}
+	defer respRequest.Body.Close()
+
+	// Check the response status code
+	if respRequest.StatusCode != http.StatusOK {
+		panic(exception.NewBadRequestError(fmt.Sprintf("An Error Occured with status code: %v", respRequest.StatusCode)))
+	}
+
+	// Read the response body
+	bodyResp, errParse := ioutil.ReadAll(respRequest.Body)
+	if errParse != nil {
+		panic(exception.NewInternalServerError(fmt.Sprintf("An Error Occured %v", errParse)))
+	}
+	logrus.Infoln(string(bodyResp))
+
 	return bodyResp
 }
 
