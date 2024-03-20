@@ -18,7 +18,7 @@ var Descriptions = map[string]string{
 	"000": "Success",
 	"021": "Success create data",
 	"022": "Success update data",
-	"041": "Username or password is wrong",
+	"041": "Invalid email or password",
 	"047": "Invalid token or access",
 	"043": "Forbidden Access resource",
 	"042": "Please check your request body",
