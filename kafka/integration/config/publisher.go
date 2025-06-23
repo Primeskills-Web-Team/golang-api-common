@@ -140,7 +140,6 @@ func (k *KafkaConfig) publishEventOnce(topic string, value kafka.Event) (*Publis
 	}, nil
 }
 
-// PublishEventWithCallback publishes event with success/failure callbacks
 func (k *KafkaConfig) PublishEventWithCallback(
 	ctx context.Context,
 	topic string,
@@ -150,7 +149,13 @@ func (k *KafkaConfig) PublishEventWithCallback(
 ) {
 	go func() {
 		result, err := k.PublishEventWithRetry(ctx, topic, value, DefaultRetryConfig())
+
 		if err != nil {
+			// ✅ TAMBAHKAN: Panggil internal failure handling SEBELUM callback user
+			logrus.Errorf("Final failure to publish event to topic %s: %v", topic, err)
+			k.handlePublishFailure(topic, value, err)
+
+			// ✅ Kemudian panggil callback user
 			if onFailure != nil {
 				onFailure(err)
 			}
@@ -725,7 +730,6 @@ func (k *KafkaConfig) isSlackEnabled() bool {
 	return enabled == "true" || enabled == "1"
 }
 
-
 // ✅ Get Slack color based on severity
 func (k *KafkaConfig) getSlackColor(severity string) string {
 	switch severity {
@@ -758,23 +762,23 @@ func (k *KafkaConfig) SendTestSlackAlert() error {
 }
 
 func (k *KafkaConfig) SendSlackAlert(alert map[string]interface{}) {
-    k.sendSlackAlert(alert)
+	k.sendSlackAlert(alert)
 }
 
 // ✅ TAMBAHKAN: Method untuk test dengan custom retry
 func (k *KafkaConfig) PublishEventWithCustomRetry(ctx context.Context, topic string, value kafka.Event, retryConfig RetryConfig, onSuccess func(*PublishResult), onFailure func(error)) {
-    go func() {
-        result, err := k.PublishEventWithRetry(ctx, topic, value, retryConfig)
-        if err != nil {
-            if onFailure != nil {
-                onFailure(err)
-            }
-        } else {
-            if onSuccess != nil {
-                onSuccess(result)
-            }
-        }
-    }()
+	go func() {
+		result, err := k.PublishEventWithRetry(ctx, topic, value, retryConfig)
+		if err != nil {
+			if onFailure != nil {
+				onFailure(err)
+			}
+		} else {
+			if onSuccess != nil {
+				onSuccess(result)
+			}
+		}
+	}()
 }
 
 // ✅ Send recovery alert when Kafka is back online
