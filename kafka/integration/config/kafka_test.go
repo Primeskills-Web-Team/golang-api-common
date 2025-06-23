@@ -7,7 +7,7 @@ import (
 )
 
 func TestPublishMessage(t *testing.T) {
-	conf := NewKafkaConfig("", "", []string{"petraverse.id:9092"})
+	conf := NewKafkaConfig("", "", []string{"petraverse.id:9092"}, "")
 	conf.PublishEvent("test_topic", kafka.Event{
 		EventName: "TEST",
 		Source:    "TESTING",
@@ -16,7 +16,7 @@ func TestPublishMessage(t *testing.T) {
 }
 
 func TestConsumerMessage(t *testing.T) {
-	conf := NewKafkaConfig("", "", []string{"petraverse.id:9092"})
+	conf := NewKafkaConfig("", "", []string{"petraverse.id:9092"}, "")
 	conf.AddConsumerListener([]string{"test_topic"}, func(value kafka.Event) {
 		logrus.Infoln("retrieve value", value.EventName)
 	})

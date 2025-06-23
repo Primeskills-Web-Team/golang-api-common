@@ -125,21 +125,23 @@ func createConfig(k *KafkaConfig) *sarama.Config {
     return config
 }
 
-func NewKafkaConfig(username string, password string, address []string) *KafkaConfig {
+func NewKafkaConfig(username string, password string, address []string, slackWebhookURL string) *KafkaConfig {
     return &KafkaConfig{
-        Username: username,
-        Password: password,
-        Address:  address,
-        Config:   DefaultKafkaConfigOptions(),
+        Username:      username,
+        Password:      password,
+        Address:       address,
+        SlackWebhookURL: slackWebhookURL,
+        Config:        DefaultKafkaConfigOptions(),
     }
 }
 
-func NewKafkaConfigWithOptions(username, password string, address []string, options KafkaConfigOptions) *KafkaConfig {
+func NewKafkaConfigWithOptions(username, password string, address []string, options KafkaConfigOptions, slackWebhookURL string) *KafkaConfig {
     return &KafkaConfig{
-        Username: username,
-        Password: password,
-        Address:  address,
-        Config:   options,
+        Username:      username,
+        Password:      password,
+        Address:       address,
+        SlackWebhookURL: slackWebhookURL,
+        Config:       options,
     }
 }
 
