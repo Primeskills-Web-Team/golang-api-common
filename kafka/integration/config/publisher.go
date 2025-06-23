@@ -757,6 +757,26 @@ func (k *KafkaConfig) SendTestSlackAlert() error {
 	return nil
 }
 
+func (k *KafkaConfig) SendSlackAlert(alert map[string]interface{}) {
+    k.sendSlackAlert(alert)
+}
+
+// ✅ TAMBAHKAN: Method untuk test dengan custom retry
+func (k *KafkaConfig) PublishEventWithCustomRetry(ctx context.Context, topic string, value kafka.Event, retryConfig RetryConfig, onSuccess func(*PublishResult), onFailure func(error)) {
+    go func() {
+        result, err := k.PublishEventWithRetry(ctx, topic, value, retryConfig)
+        if err != nil {
+            if onFailure != nil {
+                onFailure(err)
+            }
+        } else {
+            if onSuccess != nil {
+                onSuccess(result)
+            }
+        }
+    }()
+}
+
 // ✅ Send recovery alert when Kafka is back online
 func (k *KafkaConfig) SendRecoveryAlert(topic string) {
 	if !k.isSlackEnabled() {
