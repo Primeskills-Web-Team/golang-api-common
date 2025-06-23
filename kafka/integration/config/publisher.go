@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"os"
@@ -36,26 +37,26 @@ type RetryConfig struct {
 
 // ✅ Slack Message Structure
 type SlackMessage struct {
-    Text        string            `json:"text"`
-    Username    string            `json:"username,omitempty"`
-    IconEmoji   string            `json:"icon_emoji,omitempty"`
-    Channel     string            `json:"channel,omitempty"`
-    Attachments []SlackAttachment `json:"attachments,omitempty"`
+	Text        string            `json:"text"`
+	Username    string            `json:"username,omitempty"`
+	IconEmoji   string            `json:"icon_emoji,omitempty"`
+	Channel     string            `json:"channel,omitempty"`
+	Attachments []SlackAttachment `json:"attachments,omitempty"`
 }
 
 type SlackAttachment struct {
-    Color      string       `json:"color"`
-    Title      string       `json:"title,omitempty"`
-    Text       string       `json:"text,omitempty"`
-    Fields     []SlackField `json:"fields,omitempty"`
-    Footer     string       `json:"footer,omitempty"`
-    Timestamp  int64        `json:"ts,omitempty"`
+	Color     string       `json:"color"`
+	Title     string       `json:"title,omitempty"`
+	Text      string       `json:"text,omitempty"`
+	Fields    []SlackField `json:"fields,omitempty"`
+	Footer    string       `json:"footer,omitempty"`
+	Timestamp int64        `json:"ts,omitempty"`
 }
 
 type SlackField struct {
-    Title string `json:"title"`
-    Value string `json:"value"`
-    Short bool   `json:"short"`
+	Title string `json:"title"`
+	Value string `json:"value"`
+	Short bool   `json:"short"`
 }
 
 // DefaultRetryConfig returns default retry configuration
@@ -535,17 +536,32 @@ func (k *KafkaConfig) saveToDatabase(failedEvent map[string]interface{}) error {
 }
 
 func (k *KafkaConfig) sendSlackAlert(alert map[string]interface{}) {
-	// ✅ Check if Slack alerts are enabled
-	// if !k.isSlackEnabled() {
-	// 	logrus.Debug("Slack alerts disabled, skipping")
-	// 	return
-	// }
+	// ✅ Load environment untuk mendapatkan Slack config
+	_ = godotenv.Load()
 
+	// ✅ Prioritas: 1. Dari constructor, 2. Dari environment
 	slackWebhook := k.SlackWebhookURL
+	if slackWebhook == "" {
+		slackWebhook = os.Getenv("SLACK_WEBHOOK_URL")
+	}
+
 	if slackWebhook == "" {
 		logrus.Warn("SLACK_WEBHOOK_URL not configured, skipping Slack alert")
 		return
 	}
+
+	// ✅ Check if alerts enabled
+	alertEnabled := os.Getenv("ALERT_ENABLED")
+	if alertEnabled != "true" && alertEnabled != "1" {
+		logrus.Debug("Slack alerts disabled, skipping")
+		return
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"webhook_configured": slackWebhook != "",
+		"alert_enabled":      alertEnabled,
+		"topic":              alert["topic"],
+	}).Info("Preparing to send Slack alert")
 
 	// ✅ Build Slack message
 	message := k.buildSlackMessage(alert)
@@ -557,19 +573,15 @@ func (k *KafkaConfig) sendSlackAlert(alert map[string]interface{}) {
 		logrus.WithFields(logrus.Fields{
 			"topic":    alert["topic"],
 			"severity": alert["severity"],
-		}).Info("Successfully sent Slack alert")
+		}).Info("✅ Successfully sent Slack alert")
 	}
 }
 
-// ✅ Check if Slack is enabled
-func (k *KafkaConfig) isSlackEnabled() bool {
-    _ = godotenv.Load("./../../.env")
-	enabled := os.Getenv("ALERT_ENABLED")
-	return enabled == "true" || enabled == "1"
-}
-
-// ✅ Build comprehensive Slack message
+// ✅ PERBAIKAN: Enhanced buildSlackMessage
 func (k *KafkaConfig) buildSlackMessage(alert map[string]interface{}) SlackMessage {
+	// ✅ Load environment
+	_ = godotenv.Load()
+
 	severity := alert["severity"].(string)
 	topic := alert["topic"].(string)
 	errorMsg := alert["error"].(string)
@@ -591,12 +603,12 @@ func (k *KafkaConfig) buildSlackMessage(alert map[string]interface{}) SlackMessa
 		Fields: []SlackField{
 			{
 				Title: "Service",
-				Value: fmt.Sprintf("%s", alert["service"]),
+				Value: getEnvOrDefault("APP_NAME", "unknown-service"),
 				Short: true,
 			},
 			{
 				Title: "Environment",
-				Value: fmt.Sprintf("%s", alert["environment"]),
+				Value: getEnvOrDefault("ENVIRONMENT", "unknown"),
 				Short: true,
 			},
 			{
@@ -634,12 +646,85 @@ func (k *KafkaConfig) buildSlackMessage(alert map[string]interface{}) SlackMessa
 
 	return SlackMessage{
 		Text:        mainText,
-		Username:    os.Getenv("SLACK_USERNAME"),
-		IconEmoji:   os.Getenv("SLACK_ICON_EMOJI"),
-		Channel:     os.Getenv("SLACK_CHANNEL"),
+		Username:    getEnvOrDefault("SLACK_USERNAME", "Kafka Alert Bot"),
+		IconEmoji:   getEnvOrDefault("SLACK_ICON_EMOJI", ":warning:"),
+		Channel:     getEnvOrDefault("SLACK_CHANNEL", "#kafka-alerts"),
 		Attachments: []SlackAttachment{attachment},
 	}
 }
+
+// ✅ Helper function
+func getEnvOrDefault(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
+
+// ✅ PERBAIKAN: Enhanced sendToSlack dengan better error handling
+func (k *KafkaConfig) sendToSlack(webhookURL string, message SlackMessage) error {
+	// ✅ Marshal message to JSON
+	jsonData, err := json.Marshal(message)
+	if err != nil {
+		return fmt.Errorf("failed to marshal Slack message: %w", err)
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"webhook_url":  maskWebhookURL(webhookURL),
+		"message_size": len(jsonData),
+	}).Debug("Sending Slack message")
+
+	// ✅ Create HTTP request
+	req, err := http.NewRequest("POST", webhookURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "Kafka-Alert-Bot/1.0")
+
+	// ✅ Send request with timeout
+	client := &http.Client{
+		Timeout: 15 * time.Second, // Increase timeout
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send HTTP request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// ✅ Read response body for debugging
+	body, _ := io.ReadAll(resp.Body)
+
+	// ✅ Check response status
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("Slack webhook returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"status_code": resp.StatusCode,
+		"response":    string(body),
+	}).Debug("Slack message sent successfully")
+
+	return nil
+}
+
+// ✅ Helper untuk mask webhook URL
+func maskWebhookURL(url string) string {
+	if len(url) > 30 {
+		return url[:30] + "***MASKED***"
+	}
+	return "***MASKED***"
+}
+
+// ✅ Check if Slack is enabled
+func (k *KafkaConfig) isSlackEnabled() bool {
+	_ = godotenv.Load("./../../.env")
+	enabled := os.Getenv("ALERT_ENABLED")
+	return enabled == "true" || enabled == "1"
+}
+
 
 // ✅ Get Slack color based on severity
 func (k *KafkaConfig) getSlackColor(severity string) string {
@@ -653,41 +738,6 @@ func (k *KafkaConfig) getSlackColor(severity string) string {
 	default:
 		return "#808080" // Gray
 	}
-}
-
-// ✅ Send message to Slack webhook
-func (k *KafkaConfig) sendToSlack(webhookURL string, message SlackMessage) error {
-	// ✅ Marshal message to JSON
-	jsonData, err := json.Marshal(message)
-	if err != nil {
-		return fmt.Errorf("failed to marshal Slack message: %w", err)
-	}
-
-	// ✅ Create HTTP request
-	req, err := http.NewRequest("POST", webhookURL, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-
-	// ✅ Send request with timeout
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to send HTTP request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// ✅ Check response status
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("Slack webhook returned status %d", resp.StatusCode)
-	}
-
-	return nil
 }
 
 // ✅ Send test Slack alert
