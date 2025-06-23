@@ -11,12 +11,13 @@ import (
 )
 
 type KafkaConfig struct {
-    Username string
-    Password string
-    Address  []string
-    producer sarama.SyncProducer
-    mu       sync.Mutex
-    Config   KafkaConfigOptions
+    Username      string
+    Password      string
+    SlackWebhookURL string // Optional, for alerting
+    Address       []string
+    producer      sarama.SyncProducer
+    mu            sync.Mutex
+    Config        KafkaConfigOptions
 }
 
 // ✅ Configuration options
