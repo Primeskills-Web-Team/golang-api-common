@@ -25,12 +25,12 @@ type Config struct {
 	LogLevel string
 }
 
-// Default config values
-const (
-	DefaultDriver   = "sqlite3"
-	DefaultDsn      = "file::memory:?cache=shared"
-	DefaultLogLevel = "silent"
-)
+// DefaultConfig return a default database configuration.
+var DefaultConfig = Config{
+	Driver:   "sqlite3",
+	Dsn:      "file::memory:?cache=shared",
+	LogLevel: "silent",
+}
 
 // Database holds the database connection and configuration.
 type Database struct {
@@ -38,34 +38,49 @@ type Database struct {
 	db     *gorm.DB
 }
 
-// setConfig sets the configuration for the database connection.
-func (d *Database) setConfig(config Config) {
-	d.config = config
+func setConfig(config ...Config) Config {
+	if len(config) == 0 {
+		return DefaultConfig
+	}
 
-	if d.config.Driver == "" {
-		d.config.Driver = DefaultDriver
+	// Override default config with provided configs
+	cfg := config[0]
+
+	// Set default values if not provided
+	if cfg.Driver == "" {
+		cfg.Driver = DefaultConfig.Driver
 	}
-	if d.config.Dsn == "" {
-		d.config.Dsn = DefaultDsn
+	if cfg.Dsn == "" {
+		cfg.Dsn = DefaultConfig.Dsn
 	}
-	if d.config.LogLevel == "" {
-		d.config.LogLevel = DefaultLogLevel
+	if cfg.LogLevel == "" {
+		cfg.LogLevel = DefaultConfig.LogLevel
 	}
+
+	return cfg
 }
 
 // New creates a new database struct with the given configuration.
-func New(config Config) *Database {
+func New(config ...Config) *Database {
+	cfg := setConfig(config...)
+
 	database := &Database{
-		config: Config{},
+		config: cfg,
 		db:     nil,
 	}
-	database.setConfig(config)
+
+	db, err := database.setup()
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to setup database connection")
+		return nil
+	}
+	database.db = db
 
 	return database
 }
 
-// Setup initializes the database connection and returns a gorm.DB instance.
-func (d *Database) Setup() (*gorm.DB, error) {
+// setup initializes the database connection and returns a gorm.DB instance.
+func (d *Database) setup() (*gorm.DB, error) {
 	logger, err := getLogger(d.config.LogLevel)
 	if err != nil {
 		return nil, err
@@ -91,6 +106,15 @@ func (d *Database) Setup() (*gorm.DB, error) {
 	}
 
 	return db, nil
+}
+
+// GetDB returns the gorm.DB instance for the database connection.
+func (d *Database) GetDB() *gorm.DB {
+	if d.db == nil {
+		log.Error().Msg("Database connection is not initialized")
+		return nil
+	}
+	return d.db
 }
 
 // Ping checks if the database connection is alive.
