@@ -2,6 +2,7 @@ package kafka
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -87,6 +88,13 @@ type Client struct {
 	wg            sync.WaitGroup
 }
 
+type Event struct {
+	EventName string      `json:"event_name"`
+	Token     string      `json:"token"`
+	Header    string      `json:"header"`
+	Data      interface{} `json:"data"`
+}
+
 // NewClient creates a new Kafka client.
 func NewClient(config ...Config) (*Client, error) {
 	cfg := setConfig(config...)
@@ -106,17 +114,28 @@ func NewClient(config ...Config) (*Client, error) {
 }
 
 // Produce sends a message to the specified topic.
-func (c *Client) Produce(ctx context.Context, topic string, value []byte) error {
+func (c *Client) Produce(ctx context.Context, topic string, event Event) error {
+	eventBytes, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("failed to marshal event: %w", err)
+	}
+
 	msg := &sarama.ProducerMessage{
 		Topic: topic,
-		Value: sarama.ByteEncoder(value),
+		Headers: []sarama.RecordHeader{
+			{
+				Key:   []byte("source"),
+				Value: []byte(c.config.ConsumerGroup),
+			},
+		},
+		Value: sarama.ByteEncoder(eventBytes),
 	}
 	select {
 	case <-c.closed:
 		return fmt.Errorf("client closed")
 	default:
 	}
-	_, _, err := c.producer.SendMessage(msg)
+	_, _, err = c.producer.SendMessage(msg)
 	return err
 }
 
