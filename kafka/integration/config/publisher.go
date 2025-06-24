@@ -145,16 +145,17 @@ func (k *KafkaConfig) handlePublishFailure(topic string, value kafka.Event, err 
 		"error":      err.Error(),
 	}).Error("Handling Kafka publish failure")
 
-	// ✅ 1. Store to dead letter queue (dengan retry)
-	k.storeToDeadLetterQueue(topic, value, err)
+	dlqErr := k.storeToDeadLetterQueue(topic, value, err)
+	if dlqErr != nil {
+		logrus.Error("Dead letter queue failed, fallback to file log")
+		k.writeToFailureLog(fmt.Sprintf("%s-final-fallback", topic), value, dlqErr)
+	}
 
-
-	// ✅ 2. Send to monitoring/alerting system
 	k.sendAlert("kafka_publish_failed", topic, err)
-
 }
 
-func (k *KafkaConfig) storeToDeadLetterQueue(topic string, value kafka.Event, originalErr error) {
+
+func (k *KafkaConfig) storeToDeadLetterQueue(topic string, value kafka.Event, originalErr error) error {
 	deadLetterTopic := fmt.Sprintf("%s-dead-letter", topic)
 
 	deadLetterEvent := kafka.Event{
@@ -172,35 +173,26 @@ func (k *KafkaConfig) storeToDeadLetterQueue(topic string, value kafka.Event, or
 	_, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				logrus.WithFields(logrus.Fields{
-					"topic": deadLetterTopic,
-					"panic": r,
-					"event": value.EventName,
-				}).Error("Panic while storing to dead letter queue")
-			}
-		}()
+	result, err := k.publishEventOnce(deadLetterTopic, deadLetterEvent)
+	if err != nil {
+		logrus.WithFields(logrus.Fields{
+			"dead_letter_topic": deadLetterTopic,
+			"original_topic":    topic,
+			"error":             err.Error(),
+		}).Error("Failed to store to dead letter queue")
 
-		result, err := k.publishEventOnce(deadLetterTopic, deadLetterEvent)
-		if err != nil {
-			logrus.WithFields(logrus.Fields{
-				"dead_letter_topic": deadLetterTopic,
-				"original_topic":    topic,
-				"error":             err.Error(),
-			}).Error("Failed to store to dead letter queue")
+		k.writeToFailureLog(fmt.Sprintf("%s-deadletter-failed", topic), deadLetterEvent, err)
+		return err
+	}
 
-			k.writeToFailureLog(fmt.Sprintf("%s-deadletter-failed", topic), deadLetterEvent, err)
-		} else {
-			logrus.WithFields(logrus.Fields{
-				"dead_letter_topic": deadLetterTopic,
-				"partition":         result.Partition,
-				"offset":            result.Offset,
-			}).Info("Successfully stored failed event to dead letter queue")
-		}
-	}()
+	logrus.WithFields(logrus.Fields{
+		"dead_letter_topic": deadLetterTopic,
+		"partition":         result.Partition,
+		"offset":            result.Offset,
+	}).Info("Successfully stored failed event to dead letter queue")
+	return nil
 }
+
 
 
 func (k *KafkaConfig) sendAlert(alertType, topic string, err error) {
