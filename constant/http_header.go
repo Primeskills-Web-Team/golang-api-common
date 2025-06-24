@@ -1,0 +1,31 @@
+package constant
+
+// All HTTP header constants
+const (
+	HeaderContentType           = "Content-Type"
+	HeaderAccept                = "Accept"
+	HeaderAuthorization         = "Authorization"
+	HeaderUserAgent             = "User-Agent"
+	HeaderCacheControl          = "Cache-Control"
+	HeaderContentLength         = "Content-Length"
+	HeaderContentEncoding       = "Content-Encoding"
+	HeaderAcceptEncoding        = "Accept-Encoding"
+	HeaderHost                  = "Host"
+	HeaderConnection            = "Connection"
+	HeaderCookie                = "Cookie"
+	HeaderSetCookie             = "Set-Cookie"
+	HeaderLocation              = "Location"
+	HeaderXForwardedFor         = "X-Forwarded-For"
+	HeaderETag                  = "ETag"
+	HeaderIfNoneMatch           = "If-None-Match"
+	HeaderIfModifiedSince       = "If-Modified-Since"
+	HeaderPrimeskillsPaymentKey = "Primeskills-Payment-Key"
+	HeaderXRealIP               = "X-Real-IP"
+	HeaderXResource             = "X-Resource"
+	HeaderXTotalCount           = "X-Total-Count"
+	HeaderXTotalPages           = "X-Total-Pages"
+	HeaderXPage                 = "X-Page"
+	HeaderXLimit                = "X-Limit"
+	HeaderXNextPage             = "X-Next-Page"
+	HeaderXPrevPage             = "X-Prev-Page"
+)
