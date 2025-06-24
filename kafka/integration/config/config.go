@@ -1,13 +1,14 @@
 package config
 
 import (
-    "fmt"
-    "strings"
-    "sync"
-    "time"
+	"fmt"
+	"os"
+	"strings"
+	"sync"
+	"time"
 
-    "github.com/IBM/sarama"
-    "github.com/sirupsen/logrus"
+	"github.com/IBM/sarama"
+	"github.com/sirupsen/logrus"
 )
 
 type PublishResult struct {
@@ -181,20 +182,21 @@ func NewKafkaConfigWithOptions(username, password string, address []string, opti
         Config:       options,
     }
 }
-
 func (k *KafkaConfig) getOrCreateProducer() (sarama.SyncProducer, error) {
-    k.mu.Lock()
-    defer k.mu.Unlock()
-    
-    if k.producer == nil {
-        producer, err := sarama.NewSyncProducer(k.Address, createConfig(k))
-        if err != nil {
-            return nil, fmt.Errorf("unable to create kafka producer: %w", err)
-        }
-        k.producer = producer
-        logrus.Info("Created new Kafka producer")
-    }
-    return k.producer, nil
+	k.mu.Lock()
+	defer k.mu.Unlock()
+
+	if k.producer == nil {
+		brokers := strings.Split(os.Getenv("KAFKA_HOST"), ",")
+		
+		producer, err := sarama.NewSyncProducer(brokers, createConfig(k))
+		if err != nil {
+			return nil, fmt.Errorf("unable to create kafka producer: %w", err)
+		}
+		k.producer = producer
+		logrus.WithField("brokers", brokers).Info("Created new Kafka producer")
+	}
+	return k.producer, nil
 }
 
 func (k *KafkaConfig) Close() error {
