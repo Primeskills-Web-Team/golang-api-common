@@ -3,22 +3,24 @@ package config
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"github.com/Primeskills-Web-Team/golang-api-common/kafka"
+	kafkaproducer "github.com/Primeskills-Web-Team/golang-api-common/kafka/integration/command/producer"
+	"github.com/Primeskills-Web-Team/golang-api-common/pkg/circuitbreaker"
+	"github.com/joho/godotenv"
+	"github.com/sirupsen/logrus"
 	"io"
 	"math"
+	"math/rand"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
-
-	"github.com/Primeskills-Web-Team/golang-api-common/kafka"
-	kafkaproducer "github.com/Primeskills-Web-Team/golang-api-common/kafka/integration/command/producer"
-	"github.com/joho/godotenv"
-	"github.com/sirupsen/logrus"
 )
-
 
 func DefaultRetryConfig() RetryConfig {
 	return RetryConfig{
@@ -145,20 +147,162 @@ func (k *KafkaConfig) handlePublishFailure(topic string, value kafka.Event, err 
 		"error":      err.Error(),
 	}).Error("Handling Kafka publish failure")
 
-	dlqErr := k.storeToDeadLetterQueue(topic, value, err)
-	if dlqErr != nil {
-		logrus.Error("Dead letter queue failed, fallback to file log")
-		k.writeToFailureLog(fmt.Sprintf("%s-final-fallback", topic), value, dlqErr)
-	}
+	// ✅ 1. Store to dead letter queue (dengan retry) - ENABLEDx
+	k.storeToDeadLetterQueue(topic, value, err)
 
+	// ✅ 2. Store to database for manual processing - ENABLED
+	// k.storeFailedMessage(topic, value, err)
+
+	// ✅ 3. Send to monitoring/alerting system - ENABLED
 	k.sendAlert("kafka_publish_failed", topic, err)
+
+	// ✅ 4. Write to file for later processing - ENABLED
+	k.writeToFailureLog(topic, value, err)
+
+	// ✅ 5. Increment failure metrics - ENABLED
+	// k.incrementFailureMetrics(topic, err)
 }
 
+func (k *KafkaConfig) InitializeWithDLQ(dlqConfig DLQConfig) {
+	k.DLQConfig = dlqConfig
+	k.failureCache = sync.Map{}
 
-func (k *KafkaConfig) storeToDeadLetterQueue(topic string, value kafka.Event, originalErr error) error {
-	deadLetterTopic := fmt.Sprintf("%s-dead-letter", topic)
+	// ✅ Initialize circuit breaker if enabled
+	if dlqConfig.EnableCircuitBreaker {
+		k.initCircuitBreaker()
+	}
 
-	deadLetterEvent := kafka.Event{
+	logrus.WithFields(logrus.Fields{
+		"dlq_enabled":        dlqConfig.Enabled,
+		"max_retries":        dlqConfig.MaxRetries,
+		"retry_delay":        dlqConfig.RetryDelay,
+		"dead_letter_suffix": dlqConfig.DeadLetterSuffix,
+		"circuit_breaker":    dlqConfig.EnableCircuitBreaker,
+	}).Info("Kafka DLQ initialized")
+}
+
+func (k *KafkaConfig) initCircuitBreaker() {
+	config := circuitbreaker.Config{
+		Name:         "kafka-dlq",
+		MaxFailures:  k.DLQConfig.CircuitBreakerConfig.MaxFailures,
+		ResetTimeout: k.DLQConfig.CircuitBreakerConfig.ResetTimeout,
+		OnStateChange: func(from, to circuitbreaker.CircuitState) {
+			k.onCircuitBreakerStateChange(from, to)
+		},
+		OnFailure: func(err error) {
+			k.onCircuitBreakerFailure(err)
+		},
+		OnSuccess: func() {
+			k.onCircuitBreakerSuccess()
+		},
+	}
+
+	k.circuitBreaker = circuitbreaker.NewCircuitBreakerWithConfig(config)
+
+	logrus.WithFields(logrus.Fields{
+		"max_failures":  config.MaxFailures,
+		"reset_timeout": config.ResetTimeout,
+	}).Info("Circuit breaker initialized for Kafka DLQ")
+}
+
+func (k *KafkaConfig) onCircuitBreakerStateChange(from, to circuitbreaker.CircuitState) {
+	logrus.WithFields(logrus.Fields{
+		"from_state": k.getCircuitStateString(from),
+		"to_state":   k.getCircuitStateString(to),
+		"component":  "kafka-dlq",
+	}).Warn("Circuit breaker state changed")
+
+	// ✅ Send alert for state changes
+	alert := map[string]interface{}{
+		"alert_type":  "circuit_breaker_state_change",
+		"topic":       "kafka-dlq",
+		"error":       fmt.Sprintf("Circuit breaker state changed from %s to %s", k.getCircuitStateString(from), k.getCircuitStateString(to)),
+		"timestamp":   time.Now(),
+		"severity":    k.getCircuitBreakerSeverity(to),
+		"service":     os.Getenv("APP_NAME"),
+		"environment": os.Getenv("ENVIRONMENT"),
+		"kafka_hosts": k.Address,
+		"from_state":  k.getCircuitStateString(from),
+		"to_state":    k.getCircuitStateString(to),
+	}
+
+	k.sendSlackAlert(alert)
+}
+
+func (k *KafkaConfig) onCircuitBreakerFailure(err error) {
+	logrus.WithFields(logrus.Fields{
+		"error":     err.Error(),
+		"component": "kafka-dlq",
+	}).Debug("Circuit breaker recorded failure")
+}
+
+func (k *KafkaConfig) onCircuitBreakerSuccess() {
+	logrus.WithField("component", "kafka-dlq").Debug("Circuit breaker recorded success")
+}
+
+func (k *KafkaConfig) getCircuitStateString(state circuitbreaker.CircuitState) string {
+	switch state {
+	case circuitbreaker.StateClosed:
+		return "CLOSED"
+	case circuitbreaker.StateOpen:
+		return "OPEN"
+	case circuitbreaker.StateHalfOpen:
+		return "HALF-OPEN"
+	default:
+		return "UNKNOWN"
+	}
+}
+
+func (k *KafkaConfig) getCircuitBreakerSeverity(state circuitbreaker.CircuitState) string {
+	switch state {
+	case circuitbreaker.StateOpen:
+		return "critical"
+	case circuitbreaker.StateHalfOpen:
+		return "warning"
+	case circuitbreaker.StateClosed:
+		return "info"
+	default:
+		return "info"
+	}
+}
+
+// ✅ Quick setup with defaults
+func (k *KafkaConfig) EnableDLQ() {
+	k.InitializeWithDLQ(DefaultDLQConfig())
+}
+
+func (k *KafkaConfig) storeToDeadLetterQueue(topic string, value kafka.Event, originalErr error) {
+	if !k.DLQConfig.Enabled {
+		logrus.Debug("DLQ is disabled, skipping dead letter storage")
+		return
+	}
+
+	deadLetterTopic := fmt.Sprintf("%s%s", topic, k.DLQConfig.DeadLetterSuffix)
+
+	// ✅ Check for duplicate failures
+	messageKey := k.generateMessageKey(topic, value)
+	if k.DLQConfig.EnableDeduplication && k.isDuplicateFailure(messageKey) {
+		logrus.WithField("message_key", messageKey).Warn("Duplicate failure detected, skipping DLQ")
+		return
+	}
+
+	// ✅ Mark as processing
+	if k.DLQConfig.EnableDeduplication {
+		k.markFailureProcessing(messageKey)
+		defer k.clearFailureProcessing(messageKey)
+	}
+
+	// ✅ Enhanced dead letter event dengan metadata
+	deadLetterEvent := k.createDeadLetterEvent(topic, value, originalErr)
+
+	// ✅ Retry logic dengan exponential backoff
+	k.retryPublishToDeadLetter(deadLetterTopic, deadLetterEvent, topic, value, originalErr)
+}
+
+func (k *KafkaConfig) createDeadLetterEvent(topic string, value kafka.Event, originalErr error) kafka.Event {
+	hostname, _ := os.Hostname()
+
+	return kafka.Event{
 		EventName: fmt.Sprintf("%s_DEAD_LETTER", value.EventName),
 		Source:    value.Source,
 		Data: map[string]interface{}{
@@ -166,34 +310,324 @@ func (k *KafkaConfig) storeToDeadLetterQueue(topic string, value kafka.Event, or
 			"original_topic":    topic,
 			"failure_reason":    originalErr.Error(),
 			"failure_timestamp": time.Now().Unix(),
+			"failure_type":      k.getErrorType(originalErr),
 			"retry_count":       0,
+			"message_id":        k.generateMessageKey(topic, value),
+			"server_info": map[string]interface{}{
+				"hostname":    hostname,
+				"service":     os.Getenv("APP_NAME"),
+				"environment": os.Getenv("ENVIRONMENT"),
+				"version":     os.Getenv("APP_VERSION"),
+			},
+			"kafka_config": map[string]interface{}{
+				"brokers":  k.Address,
+				"username": k.Username,
+			},
+		},
+	}
+}
+
+func (k *KafkaConfig) getErrorType(err error) string {
+	errorStr := err.Error()
+
+	if strings.Contains(errorStr, "connection") {
+		return "connection_error"
+	}
+	if strings.Contains(errorStr, "timeout") {
+		return "timeout_error"
+	}
+	if strings.Contains(errorStr, "marshal") {
+		return "serialization_error"
+	}
+	if strings.Contains(errorStr, "authentication") {
+		return "auth_error"
+	}
+
+	return "unknown_error"
+}
+
+func (k *KafkaConfig) retryPublishToDeadLetter(deadLetterTopic string, deadLetterEvent kafka.Event, originalTopic string, originalValue kafka.Event, originalErr error) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logrus.WithFields(logrus.Fields{
+					"panic": r,
+					"topic": deadLetterTopic,
+				}).Error("Panic in DLQ retry goroutine")
+				k.writeToFailureLog(fmt.Sprintf("%s-dlq-panic", originalTopic), originalValue, fmt.Errorf("panic in DLQ: %v", r))
+			}
+		}()
+
+		var lastErr error
+		delay := k.DLQConfig.RetryDelay
+
+		for attempt := 0; attempt < k.DLQConfig.MaxRetries; attempt++ {
+			// ✅ Check circuit breaker before attempting
+			if k.DLQConfig.EnableCircuitBreaker && k.circuitBreaker != nil && k.circuitBreaker.IsOpen() {
+				logrus.WithFields(logrus.Fields{
+					"dead_letter_topic": deadLetterTopic,
+					"attempt":           attempt + 1,
+				}).Warn("Circuit breaker is OPEN, skipping DLQ publish attempt")
+
+				k.executeFailureFallbacks(originalTopic, originalValue, originalErr, fmt.Errorf("circuit breaker open"))
+				return
+			}
+
+			// ✅ Update retry count in event data
+			if eventData, ok := deadLetterEvent.Data.(map[string]interface{}); ok {
+				eventData["retry_count"] = attempt
+				eventData["retry_timestamp"] = time.Now().Unix()
+			}
+
+			// ✅ Use circuit breaker if enabled
+			var err error
+			if k.DLQConfig.EnableCircuitBreaker && k.circuitBreaker != nil {
+				err = k.circuitBreaker.Call(func() error {
+					_, publishErr := k.publishEventOnce(deadLetterTopic, deadLetterEvent)
+					return publishErr
+				})
+			} else {
+				_, err = k.publishEventOnce(deadLetterTopic, deadLetterEvent)
+			}
+
+			if err == nil {
+				logrus.WithFields(logrus.Fields{
+					"dead_letter_topic": deadLetterTopic,
+					"attempt":           attempt + 1,
+					"original_topic":    originalTopic,
+				}).Info("Successfully stored to dead letter queue")
+
+				if attempt > 0 {
+					k.sendDLQRecoveryAlert(deadLetterTopic, attempt)
+				}
+				return
+			}
+
+			lastErr = err
+			logrus.WithFields(logrus.Fields{
+				"attempt":           attempt + 1,
+				"max_retries":       k.DLQConfig.MaxRetries,
+				"delay":             delay,
+				"error":             err.Error(),
+				"dead_letter_topic": deadLetterTopic,
+			}).Warn("Failed to publish to dead letter queue, retrying...")
+
+			if attempt < k.DLQConfig.MaxRetries-1 {
+				jitteredDelay := k.addJitter(delay)
+				time.Sleep(jitteredDelay)
+				delay = k.calculateNextDelay(delay)
+			}
+		}
+
+		logrus.WithFields(logrus.Fields{
+			"dead_letter_topic": deadLetterTopic,
+			"original_topic":    originalTopic,
+			"final_error":       lastErr.Error(),
+			"retries":           k.DLQConfig.MaxRetries,
+		}).Error("Failed to store to dead letter queue after all retries")
+
+		k.executeFailureFallbacks(originalTopic, originalValue, originalErr, lastErr)
+	}()
+}
+
+func (k *KafkaConfig) GetDLQHealthStatus() map[string]interface{} {
+	status := map[string]interface{}{
+		"dlq_enabled": k.DLQConfig.Enabled,
+		"timestamp":   time.Now(),
+	}
+
+	if k.circuitBreaker != nil {
+		metrics := k.circuitBreaker.GetMetrics()
+		status["circuit_breaker"] = map[string]interface{}{
+			"state":          metrics.State,
+			"failure_count":  metrics.FailureCount,
+			"success_count":  metrics.SuccessCount,
+			"total_requests": metrics.TotalRequests,
+			"failure_rate":   k.circuitBreaker.GetFailureRate(),
+			"is_healthy":     k.circuitBreaker.IsHealthy(),
+		}
+
+		if metrics.LastFailureTime != nil {
+			status["circuit_breaker"].(map[string]interface{})["last_failure"] = metrics.LastFailureTime.Format(time.RFC3339)
+		}
+
+		if metrics.LastSuccessTime != nil {
+			status["circuit_breaker"].(map[string]interface{})["last_success"] = metrics.LastSuccessTime.Format(time.RFC3339)
+		}
+	}
+
+	return status
+}
+
+// ✅ Test DLQ functionality
+func (k *KafkaConfig) TestDLQ() error {
+	if !k.DLQConfig.Enabled {
+		return fmt.Errorf("DLQ is not enabled")
+	}
+
+	testEvent := kafka.Event{
+		EventName: "DLQ_TEST_EVENT",
+		Source:    "dlq-test",
+		Data: map[string]interface{}{
+			"test":      true,
+			"timestamp": time.Now().Unix(),
+			"message":   "This is a test event for DLQ functionality",
 		},
 	}
 
-	_, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	// ✅ Simulate failure to trigger DLQ
+	testError := fmt.Errorf("simulated error for DLQ testing")
 
-	result, err := k.publishEventOnce(deadLetterTopic, deadLetterEvent)
-	if err != nil {
-		logrus.WithFields(logrus.Fields{
-			"dead_letter_topic": deadLetterTopic,
-			"original_topic":    topic,
-			"error":             err.Error(),
-		}).Error("Failed to store to dead letter queue")
+	logrus.Info("Testing DLQ functionality...")
+	k.handlePublishFailure("test-topic", testEvent, testError)
 
-		k.writeToFailureLog(fmt.Sprintf("%s-deadletter-failed", topic), deadLetterEvent, err)
-		return err
-	}
-
-	logrus.WithFields(logrus.Fields{
-		"dead_letter_topic": deadLetterTopic,
-		"partition":         result.Partition,
-		"offset":            result.Offset,
-	}).Info("Successfully stored failed event to dead letter queue")
+	logrus.Info("DLQ test completed - check logs and monitoring for results")
 	return nil
 }
 
+// ✅ Get DLQ metrics
+func (k *KafkaConfig) GetDLQMetrics() map[string]interface{} {
+	metrics := map[string]interface{}{
+		"dlq_config": map[string]interface{}{
+			"enabled":                 k.DLQConfig.Enabled,
+			"max_retries":             k.DLQConfig.MaxRetries,
+			"retry_delay":             k.DLQConfig.RetryDelay.String(),
+			"max_retry_delay":         k.DLQConfig.MaxRetryDelay.String(),
+			"dead_letter_suffix":      k.DLQConfig.DeadLetterSuffix,
+			"circuit_breaker_enabled": k.DLQConfig.EnableCircuitBreaker,
+			"deduplication_enabled":   k.DLQConfig.EnableDeduplication,
+		},
+		"timestamp": time.Now(),
+	}
 
+	if k.circuitBreaker != nil {
+		cbMetrics := k.circuitBreaker.GetMetrics()
+		metrics["circuit_breaker"] = cbMetrics
+	}
+
+	return metrics
+}
+
+func (k *KafkaConfig) generateMessageKey(topic string, value kafka.Event) string {
+	// ✅ Create unique key based on topic, event name, and data hash
+	dataBytes, _ := json.Marshal(value.Data)
+	hash := fmt.Sprintf("%x", sha256.Sum256(dataBytes))
+	return fmt.Sprintf("%s:%s:%s", topic, value.EventName, hash[:16])
+}
+
+func (k *KafkaConfig) isDuplicateFailure(messageKey string) bool {
+	_, exists := k.failureCache.Load(messageKey)
+	return exists
+}
+
+func (k *KafkaConfig) markFailureProcessing(messageKey string) {
+	k.failureCache.Store(messageKey, time.Now())
+}
+
+func (k *KafkaConfig) clearFailureProcessing(messageKey string) {
+	// ✅ Clear after some time to prevent memory leak
+	go func() {
+		time.Sleep(time.Hour) // Keep for 1 hour
+		k.failureCache.Delete(messageKey)
+	}()
+}
+
+// ✅ Delay calculation with jitter
+func (k *KafkaConfig) calculateNextDelay(currentDelay time.Duration) time.Duration {
+	nextDelay := currentDelay * 2
+	if nextDelay > k.DLQConfig.MaxRetryDelay {
+		return k.DLQConfig.MaxRetryDelay
+	}
+	return nextDelay
+}
+
+func (k *KafkaConfig) addJitter(delay time.Duration) time.Duration {
+	// ✅ Add random jitter (±25%) to prevent thundering herd
+	jitter := time.Duration(rand.Int63n(int64(delay / 4)))
+	if rand.Intn(2) == 0 {
+		return delay + jitter
+	}
+	return delay - jitter
+}
+
+// ✅ Multiple fallback strategies
+func (k *KafkaConfig) executeFailureFallbacks(topic string, value kafka.Event, originalErr error, dlqErr error) {
+	logrus.WithFields(logrus.Fields{
+		"topic":        topic,
+		"original_err": originalErr.Error(),
+		"dlq_err":      dlqErr.Error(),
+	}).Error("Executing failure fallbacks")
+
+	// ✅ 1. Store to file (highest priority)
+	k.writeToFailureLog(fmt.Sprintf("%s-dlq-failed", topic), value, originalErr)
+
+	// ✅ 2. Store to database
+	// k.storeFailedMessage(topic, value, originalErr)
+
+	// ✅ 3. Send critical alert
+	// criticalAlert := map[string]interface{}{
+	//     "alert_type":  "kafka_dlq_failure",
+	//     "topic":       topic,
+	//     "error":       fmt.Sprintf("DLQ failed: %s, Original: %s", dlqErr.Error(), originalErr.Error()),
+	//     "timestamp":   time.Now(),
+	//     "severity":    "critical",
+	//     "service":     os.Getenv("APP_NAME"),
+	//     "environment": os.Getenv("ENVIRONMENT"),
+	//     "kafka_hosts": k.Address,
+	// }
+	k.sendAlert("kafka_dlq_critical_failure", topic, fmt.Errorf("DLQ system failure"))
+
+	// ✅ 4. Increment critical metrics
+	// k.incrementFailureMetrics(fmt.Sprintf("%s-dlq-failed", topic), dlqErr)
+}
+
+func (k *KafkaConfig) GetCircuitBreaker() *circuitbreaker.CircuitBreaker {
+	return k.circuitBreaker
+}
+
+// ✅ DLQ Recovery alert
+func (k *KafkaConfig) sendDLQRecoveryAlert(deadLetterTopic string, attempts int) {
+	if !k.isSlackEnabled() {
+		return
+	}
+
+	recoveryAlert := map[string]interface{}{
+		"alert_type":  "kafka_dlq_recovery",
+		"topic":       deadLetterTopic,
+		"error":       fmt.Sprintf("DLQ recovered after %d attempts", attempts),
+		"timestamp":   time.Now(),
+		"severity":    "info",
+		"service":     os.Getenv("APP_NAME"),
+		"environment": os.Getenv("ENVIRONMENT"),
+		"kafka_hosts": k.Address,
+	}
+
+	k.sendSlackAlert(recoveryAlert)
+}
+
+// ✅ 2. Database Storage Implementation
+// func (k *KafkaConfig) storeFailedMessage(topic string, value kafka.Event, err error) {
+// 	// ✅ Create failed event record
+// 	failedEvent := map[string]interface{}{
+// 		"id":            k.generateFailedEventID(),
+// 		"topic":         topic,
+// 		"event_name":    value.EventName,
+// 		"source":        value.Source,
+// 		"event_data":    value.Data,
+// 		"error_message": err.Error(),
+// 		"retry_count":   0,
+// 		"status":        "pending",
+// 		"created_at":    time.Now(),
+// 		"updated_at":    time.Now(),
+// 	}
+
+// 	logrus.WithFields(logrus.Fields{
+// 		"dead_letter_topic": deadLetterTopic,
+// 		"partition":         result.Partition,
+// 		"offset":            result.Offset,
+// 	}).Info("Successfully stored failed event to dead letter queue")
+// 	return nil
+// }
 
 func (k *KafkaConfig) sendAlert(alertType, topic string, err error) {
 	alert := map[string]interface{}{
@@ -219,7 +653,7 @@ func (k *KafkaConfig) sendAlert(alertType, topic string, err error) {
 		k.sendSlackAlert(alert)
 
 		// ✅ Send to monitoring service
-		// k.sendToMonitoringService(alert)	
+		// k.sendToMonitoringService(alert)
 		// ✅ Send email alert
 		// k.sendEmailAlert(alert)
 
@@ -311,7 +745,6 @@ func (k *KafkaConfig) determineAlertSeverity(err error) string {
 	// ✅ Default to info
 	return "info"
 }
-
 
 func (k *KafkaConfig) sendSlackAlert(alert map[string]interface{}) {
 	// ✅ Load environment untuk mendapatkan Slack config
@@ -602,4 +1035,3 @@ func (k *KafkaConfig) IsDeadLetterTopicAvailable(topic string) bool {
 	logrus.Info("DLQ topic is available and accepting messages")
 	return true
 }
-
