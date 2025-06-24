@@ -19,47 +19,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// PublishResult represents the result of a publish operation
-type PublishResult struct {
-	Success   bool
-	Error     error
-	Partition int32
-	Offset    int64
-	Timestamp time.Time
-}
 
-// RetryConfig configuration for retry mechanism
-type RetryConfig struct {
-	MaxRetries    int
-	RetryInterval time.Duration
-	BackoffFactor float64
-}
-
-// ✅ Slack Message Structure
-type SlackMessage struct {
-	Text        string            `json:"text"`
-	Username    string            `json:"username,omitempty"`
-	IconEmoji   string            `json:"icon_emoji,omitempty"`
-	Channel     string            `json:"channel,omitempty"`
-	Attachments []SlackAttachment `json:"attachments,omitempty"`
-}
-
-type SlackAttachment struct {
-	Color     string       `json:"color"`
-	Title     string       `json:"title,omitempty"`
-	Text      string       `json:"text,omitempty"`
-	Fields    []SlackField `json:"fields,omitempty"`
-	Footer    string       `json:"footer,omitempty"`
-	Timestamp int64        `json:"ts,omitempty"`
-}
-
-type SlackField struct {
-	Title string `json:"title"`
-	Value string `json:"value"`
-	Short bool   `json:"short"`
-}
-
-// DefaultRetryConfig returns default retry configuration
 func DefaultRetryConfig() RetryConfig {
 	return RetryConfig{
 		MaxRetries:    3,
@@ -68,13 +28,11 @@ func DefaultRetryConfig() RetryConfig {
 	}
 }
 
-// PublishEventWithRetry publishes event with retry mechanism and returns result
 func (k *KafkaConfig) PublishEventWithRetry(ctx context.Context, topic string, value kafka.Event, retryConfig RetryConfig) (*PublishResult, error) {
 	var lastErr error
 
 	for attempt := 0; attempt <= retryConfig.MaxRetries; attempt++ {
 		if attempt > 0 {
-			// Calculate backoff delay
 			delay := time.Duration(float64(retryConfig.RetryInterval) *
 				math.Pow(retryConfig.BackoffFactor, float64(attempt-1)))
 
@@ -99,7 +57,6 @@ func (k *KafkaConfig) PublishEventWithRetry(ctx context.Context, topic string, v
 		lastErr = err
 		logrus.Errorf("Attempt %d failed to publish to topic %s: %v", attempt+1, topic, err)
 
-		// ✅ Gunakan function dari config.go
 		if isConnectionError(err) {
 			k.resetProducer()
 		}
@@ -108,7 +65,6 @@ func (k *KafkaConfig) PublishEventWithRetry(ctx context.Context, topic string, v
 	return nil, fmt.Errorf("failed to publish after %d attempts, last error: %w", retryConfig.MaxRetries+1, lastErr)
 }
 
-// ✅ publishEventOnce menggunakan method dari config.go
 func (k *KafkaConfig) publishEventOnce(topic string, value kafka.Event) (*PublishResult, error) {
 	syncProducer, err := k.getOrCreateProducer() // ✅ Method dari config.go
 	if err != nil {
@@ -151,11 +107,10 @@ func (k *KafkaConfig) PublishEventWithCallback(
 		result, err := k.PublishEventWithRetry(ctx, topic, value, DefaultRetryConfig())
 
 		if err != nil {
-			// ✅ TAMBAHKAN: Panggil internal failure handling SEBELUM callback user
+
 			logrus.Errorf("Final failure to publish event to topic %s: %v", topic, err)
 			k.handlePublishFailure(topic, value, err)
 
-			// ✅ Kemudian panggil callback user
 			if onFailure != nil {
 				onFailure(err)
 			}
@@ -167,7 +122,6 @@ func (k *KafkaConfig) PublishEventWithCallback(
 	}()
 }
 
-// Enhanced version of original method with better error handling
 func (k *KafkaConfig) PublishEvent(topic string, value kafka.Event) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -183,7 +137,6 @@ func (k *KafkaConfig) PublishEvent(topic string, value kafka.Event) {
 		topic, result.Partition, result.Offset)
 }
 
-// ✅ ENHANCED handlePublishFailure dengan implementasi lengkap
 func (k *KafkaConfig) handlePublishFailure(topic string, value kafka.Event, err error) {
 	logrus.WithFields(logrus.Fields{
 		"topic":      topic,
@@ -193,26 +146,17 @@ func (k *KafkaConfig) handlePublishFailure(topic string, value kafka.Event, err 
 	}).Error("Handling Kafka publish failure")
 
 	// ✅ 1. Store to dead letter queue (dengan retry)
-	// k.storeToDeadLetterQueue(topic, value, err)
+	k.storeToDeadLetterQueue(topic, value, err)
 
-	// ✅ 2. Store to database for manual processing
-	// k.storeFailedMessage(topic, value, err)
 
-	// ✅ 3. Send to monitoring/alerting system
+	// ✅ 2. Send to monitoring/alerting system
 	k.sendAlert("kafka_publish_failed", topic, err)
 
-	// ✅ 4. Write to file for later processing
-	// k.writeToFailureLog(topic, value, err)
-
-	// ✅ 5. Increment failure metrics
-	// k.incrementFailureMetrics(topic, err)
 }
 
-// ✅ 1. Dead Letter Queue Implementation
 func (k *KafkaConfig) storeToDeadLetterQueue(topic string, value kafka.Event, originalErr error) {
 	deadLetterTopic := fmt.Sprintf("%s-dead-letter", topic)
 
-	// ✅ Enhanced dead letter event dengan metadata
 	deadLetterEvent := kafka.Event{
 		EventName: fmt.Sprintf("%s_DEAD_LETTER", value.EventName),
 		Source:    value.Source,
@@ -225,11 +169,9 @@ func (k *KafkaConfig) storeToDeadLetterQueue(topic string, value kafka.Event, or
 		},
 	}
 
-	// ✅ Try to publish to dead letter queue dengan timeout
 	_, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// ✅ Use simple producer untuk dead letter (avoid infinite recursion)
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -249,7 +191,6 @@ func (k *KafkaConfig) storeToDeadLetterQueue(topic string, value kafka.Event, or
 				"error":             err.Error(),
 			}).Error("Failed to store to dead letter queue")
 
-			// ✅ Fallback: store to file if dead letter fails
 			k.writeToFailureLog(fmt.Sprintf("%s-deadletter-failed", topic), deadLetterEvent, err)
 		} else {
 			logrus.WithFields(logrus.Fields{
@@ -261,54 +202,7 @@ func (k *KafkaConfig) storeToDeadLetterQueue(topic string, value kafka.Event, or
 	}()
 }
 
-// ✅ 2. Database Storage Implementation
-func (k *KafkaConfig) storeFailedMessage(topic string, value kafka.Event, err error) {
-	// ✅ Create failed event record
-	failedEvent := map[string]interface{}{
-		"id":            k.generateFailedEventID(),
-		"topic":         topic,
-		"event_name":    value.EventName,
-		"source":        value.Source,
-		"event_data":    value.Data,
-		"error_message": err.Error(),
-		"retry_count":   0,
-		"status":        "pending",
-		"created_at":    time.Now(),
-		"updated_at":    time.Now(),
-	}
 
-	// ✅ Store to database (async untuk avoid blocking)
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				logrus.WithFields(logrus.Fields{
-					"topic": topic,
-					"event": value.EventName,
-					"panic": r,
-				}).Error("Panic while storing failed message to database")
-			}
-		}()
-
-		if err := k.saveToDatabase(failedEvent); err != nil {
-			logrus.WithFields(logrus.Fields{
-				"topic": topic,
-				"event": value.EventName,
-				"error": err.Error(),
-			}).Error("Failed to store failed message to database")
-
-			// ✅ Fallback: store to file
-			k.writeToFailureLog(fmt.Sprintf("%s-db-failed", topic), value, err)
-		} else {
-			logrus.WithFields(logrus.Fields{
-				"topic":           topic,
-				"event":           value.EventName,
-				"failed_event_id": failedEvent["id"],
-			}).Info("Successfully stored failed message to database")
-		}
-	}()
-}
-
-// ✅ 3. Monitoring/Alerting Implementation
 func (k *KafkaConfig) sendAlert(alertType, topic string, err error) {
 	alert := map[string]interface{}{
 		"alert_type":  alertType,
@@ -332,19 +226,11 @@ func (k *KafkaConfig) sendAlert(alertType, topic string, err error) {
 		// ✅ Send to Slack/Discord
 		k.sendSlackAlert(alert)
 
-		// // ✅ Send to monitoring service (Prometheus, DataDog, etc.)
-		// k.sendToMonitoringService(alert)
+		// ✅ Send to monitoring service
+		// k.sendToMonitoringService(alert)	
+		// ✅ Send email alert
+		// k.sendEmailAlert(alert)
 
-		// // ✅ Send email alert for critical errors
-		// if alert["severity"] == "critical" {
-		// 	k.sendEmailAlert(alert)
-		// }
-
-		// logrus.WithFields(logrus.Fields{
-		// 	"alert_type": alertType,
-		// 	"topic":      topic,
-		// 	"severity":   alert["severity"],
-		// }).Info("Alert sent for Kafka failure")
 	}()
 }
 
@@ -409,66 +295,6 @@ func (k *KafkaConfig) writeToFailureLog(topic string, value kafka.Event, err err
 	}()
 }
 
-// ✅ 5. Metrics Implementation
-func (k *KafkaConfig) incrementFailureMetrics(topic string, err error) {
-	// ✅ Simple in-memory metrics (bisa diganti dengan Prometheus)
-	go func() {
-		// Increment failure counter
-		// metrics.KafkaFailureCounter.WithLabelValues(topic, k.getErrorType(err)).Inc()
-
-		logrus.WithFields(logrus.Fields{
-			"topic":      topic,
-			"error_type": k.getErrorType(err),
-		}).Debug("Incremented Kafka failure metrics")
-	}()
-}
-
-// ✅ Batch publish menggunakan method dari config.go
-func (k *KafkaConfig) PublishEventsBatch(ctx context.Context, topic string, events []kafka.Event) ([]*PublishResult, error) {
-	syncProducer, err := k.getOrCreateProducer() // ✅ Method dari config.go
-	if err != nil {
-		return nil, fmt.Errorf("unable to get kafka producer: %w", err)
-	}
-
-	results := make([]*PublishResult, 0, len(events))
-
-	for i, event := range events {
-		select {
-		case <-ctx.Done():
-			return results, ctx.Err()
-		default:
-		}
-
-		msg, err := json.Marshal(event)
-		if err != nil {
-			results = append(results, &PublishResult{
-				Success: false,
-				Error:   fmt.Errorf("failed to marshal event %d: %w", i, err),
-			})
-			continue
-		}
-
-		kafkaProducer := &kafkaproducer.KafkaProducer{Producer: syncProducer}
-		partition, offset, err := kafkaProducer.SendMessageSync(topic, string(msg))
-
-		if err != nil {
-			results = append(results, &PublishResult{
-				Success: false,
-				Error:   fmt.Errorf("failed to send event %d: %w", i, err),
-			})
-		} else {
-			results = append(results, &PublishResult{
-				Success:   true,
-				Partition: partition,
-				Offset:    offset,
-				Timestamp: time.Now(),
-			})
-		}
-	}
-
-	return results, nil
-}
-
 // ✅ Helper Functions
 func (k *KafkaConfig) generateFailedEventID() string {
 	return fmt.Sprintf("failed_%d_%d", time.Now().Unix(), time.Now().Nanosecond())
@@ -494,51 +320,6 @@ func (k *KafkaConfig) determineAlertSeverity(err error) string {
 	return "info"
 }
 
-func (k *KafkaConfig) getErrorType(err error) string {
-	errorStr := err.Error()
-
-	if strings.Contains(errorStr, "connection") {
-		return "connection_error"
-	}
-	if strings.Contains(errorStr, "timeout") {
-		return "timeout_error"
-	}
-	if strings.Contains(errorStr, "marshal") {
-		return "serialization_error"
-	}
-	if strings.Contains(errorStr, "authentication") {
-		return "auth_error"
-	}
-
-	return "unknown_error"
-}
-
-// ✅ Database storage implementation
-func (k *KafkaConfig) saveToDatabase(failedEvent map[string]interface{}) error {
-	// ✅ Implementation depends on your database
-	// Example for GORM:
-	/*
-	   db := database.Connection
-
-	   event := entity.FailedKafkaEvent{
-	       EventName:    failedEvent["event_name"].(string),
-	       Topic:        failedEvent["topic"].(string),
-	       Source:       failedEvent["source"].(string),
-	       ErrorMessage: failedEvent["error_message"].(string),
-	       Status:       entity.FailedEventStatusPending,
-	   }
-
-	   if err := event.SetEventData(failedEvent["event_data"]); err != nil {
-	       return err
-	   }
-
-	   return db.Create(&event).Error
-	*/
-
-	// ✅ For now, just log (implement based on your database)
-	logrus.WithField("event", failedEvent).Info("Would save to database")
-	return nil
-}
 
 func (k *KafkaConfig) sendSlackAlert(alert map[string]interface{}) {
 	// ✅ Load environment untuk mendapatkan Slack config
@@ -704,7 +485,7 @@ func (k *KafkaConfig) sendToSlack(webhookURL string, message SlackMessage) error
 
 	// ✅ Check response status
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("Slack webhook returned status %d: %s", resp.StatusCode, string(body))
+		return fmt.Errorf("slack webhook returned status %d: %s", resp.StatusCode, string(body))
 	}
 
 	logrus.WithFields(logrus.Fields{
@@ -744,44 +525,6 @@ func (k *KafkaConfig) getSlackColor(severity string) string {
 	}
 }
 
-// ✅ Send test Slack alert
-func (k *KafkaConfig) SendTestSlackAlert() error {
-	testAlert := map[string]interface{}{
-		"alert_type":  "kafka_test_alert",
-		"topic":       "test-topic",
-		"error":       "This is a test alert to verify Slack integration",
-		"timestamp":   time.Now(),
-		"severity":    "info",
-		"service":     os.Getenv("APP_NAME"),
-		"environment": os.Getenv("ENVIRONMENT"),
-		"kafka_hosts": k.Address,
-	}
-
-	k.sendSlackAlert(testAlert)
-	return nil
-}
-
-func (k *KafkaConfig) SendSlackAlert(alert map[string]interface{}) {
-	k.sendSlackAlert(alert)
-}
-
-// ✅ TAMBAHKAN: Method untuk test dengan custom retry
-func (k *KafkaConfig) PublishEventWithCustomRetry(ctx context.Context, topic string, value kafka.Event, retryConfig RetryConfig, onSuccess func(*PublishResult), onFailure func(error)) {
-	go func() {
-		result, err := k.PublishEventWithRetry(ctx, topic, value, retryConfig)
-		if err != nil {
-			if onFailure != nil {
-				onFailure(err)
-			}
-		} else {
-			if onSuccess != nil {
-				onSuccess(result)
-			}
-		}
-	}()
-}
-
-// ✅ Send recovery alert when Kafka is back online
 func (k *KafkaConfig) SendRecoveryAlert(topic string) {
 	if !k.isSlackEnabled() {
 		return
@@ -798,7 +541,6 @@ func (k *KafkaConfig) SendRecoveryAlert(topic string) {
 		"kafka_hosts": k.Address,
 	}
 
-	// ✅ Build recovery message
 	message := SlackMessage{
 		Text:      "✅ *Kafka Recovery Alert*",
 		Username:  os.Getenv("SLACK_USERNAME"),
@@ -844,3 +586,28 @@ func (k *KafkaConfig) sendEmailAlert(alert map[string]interface{}) {
 	// ✅ Implementation for email alerts
 	logrus.WithField("alert", alert).Info("Would send email alert")
 }
+
+func (k *KafkaConfig) IsDeadLetterTopicAvailable(topic string) bool {
+	_, err := k.getOrCreateProducer()
+	logrus.WithField("topic", topic).Debug("Checking DLQ topic availability")
+	if err != nil {
+		logrus.WithError(err).Error("Failed to get Kafka producer for DLQ check")
+		return false
+	}
+
+	testMsg := kafka.Event{
+		EventName: "DLQ_HEALTH_CHECK",
+		Source:    "system",
+		Data:      map[string]interface{}{"ping": "pong"},
+	}
+
+	_, err = k.publishEventOnce(topic+"-dead-letter", testMsg)
+	if err != nil {
+		logrus.WithError(err).Error("DLQ health check failed")
+		return false
+	}
+
+	logrus.Info("DLQ topic is available and accepting messages")
+	return true
+}
+

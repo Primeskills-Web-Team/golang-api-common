@@ -10,6 +10,43 @@ import (
     "github.com/sirupsen/logrus"
 )
 
+type PublishResult struct {
+	Success   bool
+	Error     error
+	Partition int32
+	Offset    int64
+	Timestamp time.Time
+}
+
+type RetryConfig struct {
+	MaxRetries    int
+	RetryInterval time.Duration
+	BackoffFactor float64
+}
+
+type SlackMessage struct {
+	Text        string            `json:"text"`
+	Username    string            `json:"username,omitempty"`
+	IconEmoji   string            `json:"icon_emoji,omitempty"`
+	Channel     string            `json:"channel,omitempty"`
+	Attachments []SlackAttachment `json:"attachments,omitempty"`
+}
+
+type SlackAttachment struct {
+	Color     string       `json:"color"`
+	Title     string       `json:"title,omitempty"`
+	Text      string       `json:"text,omitempty"`
+	Fields    []SlackField `json:"fields,omitempty"`
+	Footer    string       `json:"footer,omitempty"`
+	Timestamp int64        `json:"ts,omitempty"`
+}
+
+type SlackField struct {
+	Title string `json:"title"`
+	Value string `json:"value"`
+	Short bool   `json:"short"`
+}
+
 type KafkaConfig struct {
     Username      string
     Password      string
