@@ -49,7 +49,7 @@ func (k *KafkaConfig) PublishEventWithRetry(ctx context.Context, topic string, v
 			}
 		}
 
-		result, err := k.PublishEventOnce(topic, value)
+		result, err := k.publishEventOnce(topic, value)
 		if err == nil {
 			if attempt > 0 {
 				logrus.Infof("Successfully published to topic %s after %d retries", topic, attempt)
@@ -68,7 +68,7 @@ func (k *KafkaConfig) PublishEventWithRetry(ctx context.Context, topic string, v
 	return nil, fmt.Errorf("failed to publish after %d attempts, last error: %w", retryConfig.MaxRetries+1, lastErr)
 }
 
-func (k *KafkaConfig) PublishEventOnce(topic string, value kafka.Event) (*PublishResult, error) {
+func (k *KafkaConfig) publishEventOnce(topic string, value kafka.Event) (*PublishResult, error) {
 	syncProducer, err := k.getOrCreateProducer() // ✅ Method dari config.go
 	if err != nil {
 		return nil, fmt.Errorf("unable to get kafka producer: %w", err)
@@ -365,11 +365,11 @@ func (k *KafkaConfig) retryPublishToDeadLetter(deadLetterTopic string, deadLette
 			var err error
 			if k.DLQConfig.EnableCircuitBreaker && k.circuitBreaker != nil {
 				err = k.circuitBreaker.Call(func() error {
-					_, publishErr := k.PublishEventOnce(deadLetterTopic, deadLetterEvent)
+					_, publishErr := k.publishEventOnce(deadLetterTopic, deadLetterEvent)
 					return publishErr
 				})
 			} else {
-				_, err = k.PublishEventOnce(deadLetterTopic, deadLetterEvent)
+				_, err = k.publishEventOnce(deadLetterTopic, deadLetterEvent)
 			}
 
 			if err == nil {
@@ -1027,7 +1027,7 @@ func (k *KafkaConfig) IsDeadLetterTopicAvailable(topic string) bool {
 		Data:      map[string]interface{}{"ping": "pong"},
 	}
 
-	_, err = k.PublishEventOnce(topic+"-dead-letter", testMsg)
+	_, err = k.publishEventOnce(topic+"-dead-letter", testMsg)
 	if err != nil {
 		logrus.WithError(err).Error("DLQ health check failed")
 		return false
