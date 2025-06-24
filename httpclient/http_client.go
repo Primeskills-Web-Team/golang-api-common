@@ -14,33 +14,83 @@ import (
 
 // Config holds the configuration for the HTTP client
 type Config struct {
-	Timeout          time.Duration
-	MaxRetries       int
-	RetryWaitTime    time.Duration
+	// Timeout specifies the maximum duration for an HTTP request.
+	// If the request takes longer than this duration, it will be canceled.
+	//
+	// Default: 30 seconds
+	Timeout time.Duration
+
+	// MaxRetries specifies the maximum number of retries for a failed request.
+	// If a request fails, it will be retried up to this number of times.
+	//
+	// Default: 3
+	MaxRetries int
+
+	// RetryWaitTime specifies the initial wait time before retrying a failed request.
+	// The wait time will double with each retry, up to MaxRetryWaitTime.
+	//
+	// Default: 1 second
+	RetryWaitTime time.Duration
+
+	// MaxRetryWaitTime specifies the maximum wait time between retries.
+	// If the wait time exceeds this duration, it will be capped at this value.
+	//
+	// Default: 10 seconds
 	MaxRetryWaitTime time.Duration
 }
 
-// DefaultConfig returns the default configuration
-func DefaultConfig() *Config {
-	return &Config{
-		Timeout:          30 * time.Second,
-		MaxRetries:       3,
-		RetryWaitTime:    1 * time.Second,
-		MaxRetryWaitTime: 10 * time.Second,
+var DefaultConfig = Config{
+	Timeout:          30 * time.Second,
+	MaxRetries:       3,
+	RetryWaitTime:    1 * time.Second,
+	MaxRetryWaitTime: 10 * time.Second,
+}
+
+// setConfig sets the HTTP client configuration.
+func setConfig(config ...Config) Config {
+	if len(config) == 0 {
+		return DefaultConfig
+	}
+
+	// Override default config with provided configs
+	cfg := config[0]
+
+	// Set default values if not provided
+	if cfg.Timeout == 0 {
+		cfg.Timeout = DefaultConfig.Timeout
+	}
+	if cfg.MaxRetries == 0 {
+		cfg.MaxRetries = DefaultConfig.MaxRetries
+	}
+	if cfg.RetryWaitTime == 0 {
+		cfg.RetryWaitTime = DefaultConfig.RetryWaitTime
+	}
+	if cfg.MaxRetryWaitTime == 0 {
+		cfg.MaxRetryWaitTime = DefaultConfig.MaxRetryWaitTime
+	}
+	return cfg
+}
+
+type HttpClient struct {
+	config Config
+	client *http.Client
+}
+
+// New creates a new HttpClient with the provided configuration.
+func New(config ...Config) HttpClient {
+	cfg := setConfig(config...)
+	client := &http.Client{
+		Timeout: cfg.Timeout,
+	}
+
+	return HttpClient{
+		config: cfg,
+		client: client,
 	}
 }
 
-type HttpClient interface {
-	Call(ctx context.Context, method string, url string, headers map[string]string, body interface{}, result interface{}) error
-}
-
-type httpClient struct {
-	client *http.Client
-	config *Config
-}
-
 // Call executes an HTTP request with the specified method, URL, headers, and body.
-func (h *httpClient) Call(ctx context.Context, method string, url string, headers map[string]string, body interface{}, result interface{}) error {
+func (h *HttpClient) Call(ctx context.Context, method string, url string, headers map[string]string, body interface{}, result interface{}) error {
 	switch method {
 	case http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
 		// supported method, no action needed
@@ -135,18 +185,4 @@ func (h *httpClient) Call(ctx context.Context, method string, url string, header
 	}
 
 	return nil
-}
-
-// NewHttpClient creates a new instance of HttpClient with the provided configuration.
-func NewHttpClient(config *Config) HttpClient {
-	if config == nil {
-		config = DefaultConfig()
-	}
-
-	return &httpClient{
-		client: &http.Client{
-			Timeout: config.Timeout,
-		},
-		config: config,
-	}
 }

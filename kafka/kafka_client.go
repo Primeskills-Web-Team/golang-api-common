@@ -50,13 +50,13 @@ func defaultSaramaConfig() *sarama.Config {
 }
 
 // setConfig sets the Kafka client configuration.
-func setConfig(configs ...Config) Config {
-	if len(configs) == 0 {
+func setConfig(config ...Config) Config {
+	if len(config) == 0 {
 		return DefaultConfig
 	}
 
 	// Override default config with provided configs
-	cfg := configs[0]
+	cfg := config[0]
 
 	// Set default values if not provided
 	if len(cfg.Brokers) == 0 {
@@ -88,8 +88,8 @@ type Client struct {
 }
 
 // NewClient creates a new Kafka client.
-func NewClient(configs ...Config) (*Client, error) {
-	cfg := setConfig(configs...)
+func NewClient(config ...Config) (*Client, error) {
+	cfg := setConfig(config...)
 
 	producer, err := sarama.NewSyncProducer(cfg.Brokers, cfg.SaramaConfig)
 	if err != nil {
