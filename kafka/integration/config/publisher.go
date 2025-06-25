@@ -69,7 +69,7 @@ func (k *KafkaConfig) PublishEventWithRetry(ctx context.Context, topic string, v
 }
 
 func (k *KafkaConfig) publishEventOnce(topic string, value kafka.Event) (*PublishResult, error) {
-	syncProducer, err := k.getOrCreateProducer() // ✅ Method dari config.go
+	syncProducer, err := k.getOrCreateProducer()
 	if err != nil {
 		return nil, fmt.Errorf("unable to get kafka producer: %w", err)
 	}
@@ -1001,15 +1001,15 @@ func (k *KafkaConfig) SendRecoveryAlert(topic string) {
 	}
 }
 
-// ✅ Monitoring service implementation
+// sendToMonitoringService is a function that sends an alert to the monitoring service
 func (k *KafkaConfig) sendToMonitoringService(alert map[string]interface{}) {
-	// ✅ Implementation for monitoring service
+	// TODO: Implement monitoring service
 	logrus.WithField("alert", alert).Info("Would send to monitoring service")
 }
 
-// ✅ Email alert implementation
+// sendEmailAlert is a function that sends an alert to the email service
 func (k *KafkaConfig) sendEmailAlert(alert map[string]interface{}) {
-	// ✅ Implementation for email alerts
+	// TODO: Implement email alert
 	logrus.WithField("alert", alert).Info("Would send email alert")
 }
 

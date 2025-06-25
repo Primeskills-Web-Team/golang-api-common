@@ -1,27 +1,23 @@
 package config
 
 import (
+	"os"
+
 	"github.com/IBM/sarama"
 	"github.com/Primeskills-Web-Team/golang-api-common/kafka"
 	"github.com/Primeskills-Web-Team/golang-api-common/kafka/integration/command/consumer"
 	"github.com/sirupsen/logrus"
-	"os"
 )
 
-func (k *KafkaConfig) AddConsumerListener(topics []string, handler func(value kafka.Event)) {
-	consumers, err := sarama.NewConsumer(k.Address, createConfig(k))
+func (k *KafkaConfig) AddConsumerListener(topics []string, handler func(value kafka.Event), consumerGroupId string) {
+	consumerGroup, err := sarama.NewConsumerGroup(k.Address, consumerGroupId, createConfig(k))
 	if err != nil {
-		logrus.Errorf("Error create kakfa consumer got error %v", err)
+		logrus.Errorf("Error create kafka consumer group got error %v", err)
+		return
 	}
-	defer func() {
-		if err := consumers.Close(); err != nil {
-			logrus.Fatal(err)
-			return
-		}
-	}()
 
 	kafkaConsumer := &consumer.KafkaConsumer{
-		Consumer: consumers,
+		ConsumerGroup: consumerGroup,
 	}
 
 	signals := make(chan os.Signal, 1)
