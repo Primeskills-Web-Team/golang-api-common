@@ -53,7 +53,6 @@ func initAppConfig() {
         Port:                os.Getenv("PORT"),
         AppName:             os.Getenv("APP_NAME"),
         ServiceDiscoveryURL: os.Getenv("SERVICE_DISCOVERY_URL"),
-        AlertEnabled:        os.Getenv("ALERT_ENABLED") == "true",
         Environment:         os.Getenv("ENVIRONMENT"),
     }
 
