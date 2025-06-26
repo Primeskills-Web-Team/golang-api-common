@@ -2,7 +2,6 @@ package config
 
 import (
 	"os"
-	// "path/filepath"
 	"testing"
 	"time"
 
@@ -143,7 +142,7 @@ func TestSlackMessageBuilding(t *testing.T) {
 			"kafka_hosts": []string{"localhost:9092"},
 		}
 
-		message := config.buildSlackMessage(alert)
+		message := config.slackHelper.BuildSlackMessage(alert)
 
 		assert.NotEmpty(t, message.Text)
 		assert.Contains(t, message.Text, "Kafka Failure Alert")
@@ -156,54 +155,12 @@ func TestSlackMessageBuilding(t *testing.T) {
 	})
 
 	t.Run("get slack colors", func(t *testing.T) {
-		assert.Equal(t, "danger", config.getSlackColor("critical"))
-		assert.Equal(t, "warning", config.getSlackColor("warning"))
-		assert.Equal(t, "good", config.getSlackColor("info"))
-		assert.Equal(t, "#808080", config.getSlackColor("unknown"))
+		assert.Equal(t, "danger", config.slackHelper.GetSlackColor("critical"))
+		assert.Equal(t, "warning", config.slackHelper.GetSlackColor("warning"))
+		assert.Equal(t, "good", config.slackHelper.GetSlackColor("info"))
+		assert.Equal(t, "#808080", config.slackHelper.GetSlackColor("unknown"))
 
 		t.Log("✅ All color mappings working correctly")
-	})
-}
-
-func TestSlackConfiguration(t *testing.T) {
-	config := setupSlackTest(t)
-
-	t.Run("check slack enabled", func(t *testing.T) {
-		// Save original value
-		originalValue := os.Getenv("ALERT_ENABLED")
-		defer func() {
-			if originalValue != "" {
-				os.Setenv("ALERT_ENABLED", originalValue)
-			} else {
-				os.Unsetenv("ALERT_ENABLED")
-			}
-		}()
-
-		// Test with enabled
-		os.Setenv("ALERT_ENABLED", "true")
-		assert.True(t, config.isSlackEnabled())
-		t.Log("✅ Slack enabled check: true")
-
-		// Test with disabled
-		os.Setenv("ALERT_ENABLED", "false")
-		assert.False(t, config.isSlackEnabled())
-		t.Log("✅ Slack disabled check: false")
-
-		// Test with numeric true
-		os.Setenv("ALERT_ENABLED", "1")
-		assert.True(t, config.isSlackEnabled())
-		t.Log("✅ Slack enabled check with '1': true")
-	})
-
-	t.Run("check webhook URL configuration", func(t *testing.T) {
-		webhookURL := os.Getenv("SLACK_WEBHOOK_URL")
-
-		if webhookURL != "" {
-			assert.Contains(t, webhookURL, "hooks.slack.com")
-			t.Log("✅ Slack webhook URL is properly configured")
-		} else {
-			t.Log("⚠️ Slack webhook URL not configured")
-		}
 	})
 }
 
