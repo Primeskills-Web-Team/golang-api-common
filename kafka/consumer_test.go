@@ -25,7 +25,7 @@ func (m *MockConsumerHandler) HandleMessage(msg *sarama.ConsumerMessage) error {
 func TestConsume_NoConsumerGroup(t *testing.T) {
 	kafka := &Kafka{
 		config: Config{
-			ConsumerGroup: "", // Empty consumer group
+			AppName: "", // Empty consumer group
 		},
 	}
 
@@ -40,9 +40,9 @@ func TestConsume_NoConsumerGroup(t *testing.T) {
 func TestConsume_CreateConsumerGroupError(t *testing.T) {
 	kafka := &Kafka{
 		config: Config{
-			Brokers:       []string{"invalid:9092"},
-			ConsumerGroup: "test-group",
-			SaramaConfig:  defaultSaramaConfig(),
+			Brokers:      []string{"invalid:9092"},
+			AppName:      "test-group",
+			SaramaConfig: defaultSaramaConfig(),
 		},
 	}
 
@@ -193,9 +193,9 @@ func TestConsume_SuccessfulSetup(t *testing.T) {
 	// This test verifies the consumer setup process
 	kafka := &Kafka{
 		config: Config{
-			Brokers:       []string{"localhost:9092"},
-			ConsumerGroup: "test-group",
-			SaramaConfig:  defaultSaramaConfig(),
+			Brokers:      []string{"localhost:9092"},
+			AppName:      "test-group",
+			SaramaConfig: defaultSaramaConfig(),
 		},
 		wg: sync.WaitGroup{},
 	}
@@ -212,9 +212,9 @@ func TestConsume_SuccessfulSetup(t *testing.T) {
 func TestConsume_ContextCancellation(t *testing.T) {
 	kafka := &Kafka{
 		config: Config{
-			Brokers:       []string{"localhost:9092"},
-			ConsumerGroup: "test-group",
-			SaramaConfig:  defaultSaramaConfig(),
+			Brokers:      []string{"localhost:9092"},
+			AppName:      "test-group",
+			SaramaConfig: defaultSaramaConfig(),
 		},
 		wg: sync.WaitGroup{},
 	}

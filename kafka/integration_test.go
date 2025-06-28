@@ -16,9 +16,9 @@ func TestDLQIntegration_FullWorkflow(t *testing.T) {
 
 	kafka := &Kafka{
 		config: Config{
-			WithDlq:       true,
-			Storage:       &storageInterface,
-			ConsumerGroup: "integration-test-group",
+			WithDlq: true,
+			Storage: &storageInterface,
+			AppName: "integration-test-group",
 		},
 	}
 
@@ -86,16 +86,16 @@ func TestConfigValidation_EdgeCases(t *testing.T) {
 		{
 			name: "Minimal valid config",
 			config: Config{
-				Brokers:       []string{"localhost:9092"},
-				ConsumerGroup: "test",
+				Brokers: []string{"localhost:9092"},
+				AppName: "test",
 			},
 			valid: true,
 		},
 		{
 			name: "Multiple brokers",
 			config: Config{
-				Brokers:       []string{"broker1:9092", "broker2:9092", "broker3:9092"},
-				ConsumerGroup: "test",
+				Brokers: []string{"broker1:9092", "broker2:9092", "broker3:9092"},
+				AppName: "test",
 			},
 			valid: true,
 		},
@@ -103,7 +103,7 @@ func TestConfigValidation_EdgeCases(t *testing.T) {
 			name: "Custom timeouts",
 			config: Config{
 				Brokers:         []string{"localhost:9092"},
-				ConsumerGroup:   "test",
+				AppName:         "test",
 				ProducerTimeout: 30 * time.Second,
 				ConsumerTimeout: 60 * time.Second,
 			},
@@ -112,10 +112,10 @@ func TestConfigValidation_EdgeCases(t *testing.T) {
 		{
 			name: "DLQ without storage (invalid)",
 			config: Config{
-				Brokers:       []string{"localhost:9092"},
-				ConsumerGroup: "test",
-				WithDlq:       true,
-				Storage:       nil,
+				Brokers: []string{"localhost:9092"},
+				AppName: "test",
+				WithDlq: true,
+				Storage: nil,
 			},
 			valid: false,
 		},

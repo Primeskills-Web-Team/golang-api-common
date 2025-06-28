@@ -18,7 +18,6 @@ type MockConsumerGroupForLoop struct {
 	mock.Mock
 	consumeCount int
 	maxConsumes  int
-	ctx          context.Context
 }
 
 func (m *MockConsumerGroupForLoop) Consume(ctx context.Context, topics []string, handler sarama.ConsumerGroupHandler) error {
@@ -82,9 +81,9 @@ func TestConsume_ConsumerLoop(t *testing.T) {
 
 	kafka := &Kafka{
 		config: Config{
-			Brokers:       []string{"localhost:9092"},
-			ConsumerGroup: "test-group",
-			SaramaConfig:  defaultSaramaConfig(),
+			Brokers:      []string{"localhost:9092"},
+			AppName:      "test-group",
+			SaramaConfig: defaultSaramaConfig(),
 		},
 		wg: sync.WaitGroup{},
 	}
@@ -104,7 +103,7 @@ func TestConsume_ConsumerLoop(t *testing.T) {
 
 	// Since we can't easily test the full consumer loop without complex setup,
 	// we'll test the parts we can
-	assert.Equal(t, "test-group", kafka.config.ConsumerGroup)
+	assert.Equal(t, "test-group", kafka.config.AppName)
 	assert.NotNil(t, kafka.config.SaramaConfig)
 	assert.NotNil(t, handler) // Use the handler variable
 	assert.NotNil(t, ctx)     // Use the ctx variable
@@ -147,13 +146,13 @@ func TestConsume_ReadyChannelHandling(t *testing.T) {
 func TestNew_ConfigSuccess(t *testing.T) {
 	// Test successful config creation
 	config, err := setConfig(Config{
-		Brokers:       []string{"localhost:9092"},
-		ConsumerGroup: "test-group",
+		Brokers: []string{"localhost:9092"},
+		AppName: "test-group",
 	})
 
 	assert.NoError(t, err)
 	assert.Equal(t, []string{"localhost:9092"}, config.Brokers)
-	assert.Equal(t, "test-group", config.ConsumerGroup)
+	assert.Equal(t, "test-group", config.AppName)
 	assert.NotNil(t, config.SaramaConfig)
 
 	// Test that the New function would use this config
@@ -168,7 +167,7 @@ func TestProduce_AdditionalScenarios(t *testing.T) {
 
 	kafka := &Kafka{
 		config: Config{
-			ConsumerGroup: "test-group",
+			AppName: "test-group",
 		},
 		producer: mockProducer,
 		closed:   make(chan struct{}),
@@ -193,7 +192,7 @@ func TestProduce_HeaderGeneration(t *testing.T) {
 
 	kafka := &Kafka{
 		config: Config{
-			ConsumerGroup: "header-test-group",
+			AppName: "header-test-group",
 		},
 		producer: mockProducer,
 		closed:   make(chan struct{}),
@@ -225,9 +224,9 @@ func TestSendToDLQ_EdgeCases(t *testing.T) {
 
 	kafka := &Kafka{
 		config: Config{
-			WithDlq:       true,
-			Storage:       &storageInterface,
-			ConsumerGroup: "edge-test-group",
+			WithDlq: true,
+			Storage: &storageInterface,
+			AppName: "edge-test-group",
 		},
 	}
 

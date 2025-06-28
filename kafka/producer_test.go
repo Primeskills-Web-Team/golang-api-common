@@ -46,7 +46,7 @@ func TestProduce_ClientClosedCheck(t *testing.T) {
 	// Test the client closed channel logic
 	kafka := &Kafka{
 		config: Config{
-			ConsumerGroup: "test-group",
+			AppName: "test-group",
 		},
 		closed: make(chan struct{}),
 	}
@@ -68,7 +68,7 @@ func TestProduce_OpenClient(t *testing.T) {
 	// Test with open client (will fail at producer.SendMessage but we can test the logic before that)
 	kafka := &Kafka{
 		config: Config{
-			ConsumerGroup: "test-group",
+			AppName: "test-group",
 		},
 		closed:   make(chan struct{}),
 		producer: nil, // This will cause a panic/error when SendMessage is called

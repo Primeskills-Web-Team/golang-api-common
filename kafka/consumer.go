@@ -10,17 +10,18 @@ import (
 
 // Consume starts consuming messages from the specified topics using the provided handler.
 func (c *Kafka) Consume(ctx context.Context, topics []string, handler ConsumerHandler) error {
-	if c.config.ConsumerGroup == "" {
+	if c.config.AppName == "" {
 		return fmt.Errorf("consumer group not specified")
 	}
 
-	consumerGroup, err := sarama.NewConsumerGroup(c.config.Brokers, c.config.ConsumerGroup, c.config.SaramaConfig)
+	consumerGroup, err := sarama.NewConsumerGroup(c.config.Brokers, c.config.AppName, c.config.SaramaConfig)
 	if err != nil {
 		return fmt.Errorf("failed to create consumer group: %w", err)
 	}
 	c.consumerGroup = consumerGroup
 
 	consumer := &consumer{
+		kafka:   c,
 		handler: handler,
 		ready:   make(chan bool),
 	}
@@ -54,6 +55,7 @@ func (c *Kafka) Consume(ctx context.Context, topics []string, handler ConsumerHa
 
 // consumer implements sarama.ConsumerGroupHandler.
 type consumer struct {
+	kafka   *Kafka
 	handler ConsumerHandler
 	ready   chan bool
 }
@@ -74,6 +76,10 @@ func (c *consumer) ConsumeClaim(session sarama.ConsumerGroupSession, claim saram
 	for message := range claim.Messages() {
 		if err := c.handler.HandleMessage(message); err != nil {
 			log.Error().Err(err).Msg("Handler error")
+			// Send to DLQ
+			if err := c.kafka.SendToDLQ(message, err); err != nil {
+				log.Error().Err(err).Msg("Failed to send to DLQ")
+			}
 		}
 		session.MarkMessage(message, "") // Mark message as processed
 	}

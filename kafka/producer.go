@@ -20,7 +20,7 @@ func (c *Kafka) Produce(ctx context.Context, topic string, event Event) error {
 		Headers: []sarama.RecordHeader{
 			{
 				Key:   []byte("source"),
-				Value: []byte(c.config.ConsumerGroup),
+				Value: []byte(c.config.AppName),
 			},
 		},
 		Value: sarama.ByteEncoder(eventBytes),

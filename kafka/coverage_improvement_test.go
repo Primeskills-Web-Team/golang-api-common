@@ -72,9 +72,9 @@ func TestConsume_FullFlow(t *testing.T) {
 	// Create a kafka instance with wait group
 	kafka := &Kafka{
 		config: Config{
-			Brokers:       []string{"localhost:9092"},
-			ConsumerGroup: "test-group",
-			SaramaConfig:  defaultSaramaConfig(),
+			Brokers:      []string{"localhost:9092"},
+			AppName:      "test-group",
+			SaramaConfig: defaultSaramaConfig(),
 		},
 		wg: sync.WaitGroup{},
 	}
@@ -98,9 +98,9 @@ func TestConsume_FullFlow(t *testing.T) {
 func TestConsume_ContextCancellationDuringConsume(t *testing.T) {
 	kafka := &Kafka{
 		config: Config{
-			Brokers:       []string{"localhost:9092"},
-			ConsumerGroup: "test-group",
-			SaramaConfig:  defaultSaramaConfig(),
+			Brokers:      []string{"localhost:9092"},
+			AppName:      "test-group",
+			SaramaConfig: defaultSaramaConfig(),
 		},
 		wg: sync.WaitGroup{},
 	}
@@ -247,7 +247,7 @@ func TestProduce_CompleteFlow(t *testing.T) {
 
 	kafka := &Kafka{
 		config: Config{
-			ConsumerGroup: "test-group",
+			AppName: "test-group",
 		},
 		producer: mockProducer,
 		closed:   make(chan struct{}),
@@ -274,7 +274,7 @@ func TestProduce_ProducerSendError(t *testing.T) {
 
 	kafka := &Kafka{
 		config: Config{
-			ConsumerGroup: "test-group",
+			AppName: "test-group",
 		},
 		producer: mockProducer,
 		closed:   make(chan struct{}),
@@ -318,9 +318,9 @@ func TestDLQMessage_EmptyHeaders(t *testing.T) {
 
 	kafka := &Kafka{
 		config: Config{
-			WithDlq:       true,
-			Storage:       &storageInterface,
-			ConsumerGroup: "test-group",
+			WithDlq: true,
+			Storage: &storageInterface,
+			AppName: "test-group",
 		},
 	}
 

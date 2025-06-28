@@ -6,6 +6,7 @@ import (
 
 	"github.com/IBM/sarama"
 	"github.com/Primeskills-Web-Team/golang-api-common/v2/storage"
+	telegramnotifier "github.com/Primeskills-Web-Team/golang-api-common/v2/telegram_notifier"
 )
 
 // Config holds Kafka client configuration.
@@ -16,8 +17,8 @@ type Config struct {
 	// Default: 10 * time.Second
 	ProducerTimeout time.Duration
 
-	// Default: "default-group"
-	ConsumerGroup string
+	// Default: "default-app"
+	AppName string
 
 	// Default: 10 * time.Second
 	ConsumerTimeout time.Duration
@@ -34,17 +35,27 @@ type Config struct {
 	// If WithDlq is true, the client will use the storage to store messages that cannot be processed.
 	// Default: nil
 	Storage *storage.Storage
+
+	// If true, the client will use the alert to send alerts when there are errors.
+	// Default: false
+	WithAlert bool
+
+	// If WithAlert is true, the client will use the telegram notifier to send alerts when there are errors.
+	// Default: nil
+	TelegramNotifier *telegramnotifier.TelegramNotifier
 }
 
 // DefaultConfig returns a default Kafka configuration.
 var DefaultConfig = Config{
-	Brokers:         []string{"localhost:9092"},
-	ProducerTimeout: 10 * time.Second,
-	ConsumerGroup:   "default-group",
-	ConsumerTimeout: 10 * time.Second,
-	SaramaConfig:    defaultSaramaConfig(),
-	WithDlq:         false,
-	Storage:         nil,
+	Brokers:          []string{"localhost:9092"},
+	ProducerTimeout:  10 * time.Second,
+	AppName:          "default-app",
+	ConsumerTimeout:  10 * time.Second,
+	SaramaConfig:     defaultSaramaConfig(),
+	WithDlq:          false,
+	Storage:          nil,
+	WithAlert:        false,
+	TelegramNotifier: nil,
 }
 
 // defaultSaramaConfig returns a default sarama kafka configuration.
@@ -73,8 +84,8 @@ func setConfig(config ...Config) (Config, error) {
 	if cfg.ProducerTimeout == 0 {
 		cfg.ProducerTimeout = DefaultConfig.ProducerTimeout
 	}
-	if cfg.ConsumerGroup == "" {
-		cfg.ConsumerGroup = DefaultConfig.ConsumerGroup
+	if cfg.AppName == "" {
+		cfg.AppName = DefaultConfig.AppName
 	}
 	if cfg.ConsumerTimeout == 0 {
 		cfg.ConsumerTimeout = DefaultConfig.ConsumerTimeout
@@ -86,6 +97,9 @@ func setConfig(config ...Config) (Config, error) {
 	// Validate config
 	if cfg.WithDlq && cfg.Storage == nil {
 		return Config{}, fmt.Errorf("DLQ is enabled but no storage configured")
+	}
+	if cfg.WithAlert && cfg.TelegramNotifier == nil {
+		return Config{}, fmt.Errorf("alert is enabled but no telegram notifier configured")
 	}
 	return cfg, nil
 }

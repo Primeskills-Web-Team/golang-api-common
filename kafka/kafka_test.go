@@ -32,8 +32,8 @@ func TestNew_DefaultConfig(t *testing.T) {
 
 func TestNew_ValidConfig(t *testing.T) {
 	config := Config{
-		Brokers:       []string{"localhost:9092"},
-		ConsumerGroup: "test-group",
+		Brokers: []string{"localhost:9092"},
+		AppName: "test-group",
 	}
 
 	// This should fail with connection error, but we can verify the error type
@@ -69,10 +69,10 @@ func TestKafka_InitialState(t *testing.T) {
 	var storageInterface storage.Storage = mockStorage
 
 	config := Config{
-		Brokers:       []string{"test:9092"},
-		ConsumerGroup: "test-group",
-		WithDlq:       true,
-		Storage:       &storageInterface,
+		Brokers: []string{"test:9092"},
+		AppName: "test-group",
+		WithDlq: true,
+		Storage: &storageInterface,
 	}
 
 	// We can test the config validation
@@ -80,7 +80,7 @@ func TestKafka_InitialState(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, config.Brokers, validatedConfig.Brokers)
-	assert.Equal(t, config.ConsumerGroup, validatedConfig.ConsumerGroup)
+	assert.Equal(t, config.AppName, validatedConfig.AppName)
 	assert.True(t, validatedConfig.WithDlq)
 	assert.NotNil(t, validatedConfig.Storage)
 }
@@ -95,29 +95,29 @@ func TestKafka_ConfigValidation(t *testing.T) {
 		{
 			name: "Valid config without DLQ",
 			config: Config{
-				Brokers:       []string{"localhost:9092"},
-				ConsumerGroup: "test-group",
-				WithDlq:       false,
+				Brokers: []string{"localhost:9092"},
+				AppName: "test-group",
+				WithDlq: false,
 			},
 			expectError: false,
 		},
 		{
 			name: "Valid config with DLQ and storage",
 			config: Config{
-				Brokers:       []string{"localhost:9092"},
-				ConsumerGroup: "test-group",
-				WithDlq:       true,
-				Storage:       func() *storage.Storage { s := NewMockStorage(); var iface storage.Storage = s; return &iface }(),
+				Brokers: []string{"localhost:9092"},
+				AppName: "test-group",
+				WithDlq: true,
+				Storage: func() *storage.Storage { s := NewMockStorage(); var iface storage.Storage = s; return &iface }(),
 			},
 			expectError: false,
 		},
 		{
 			name: "Invalid config - DLQ without storage",
 			config: Config{
-				Brokers:       []string{"localhost:9092"},
-				ConsumerGroup: "test-group",
-				WithDlq:       true,
-				Storage:       nil,
+				Brokers: []string{"localhost:9092"},
+				AppName: "test-group",
+				WithDlq: true,
+				Storage: nil,
 			},
 			expectError: true,
 			errorMsg:    "DLQ is enabled but no storage configured",

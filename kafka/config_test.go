@@ -80,7 +80,7 @@ func TestDefaultConfig(t *testing.T) {
 
 	assert.Equal(t, []string{"localhost:9092"}, config.Brokers)
 	assert.Equal(t, 10*time.Second, config.ProducerTimeout)
-	assert.Equal(t, "default-group", config.ConsumerGroup)
+	assert.Equal(t, "default-group", config.AppName)
 	assert.Equal(t, 10*time.Second, config.ConsumerTimeout)
 	assert.NotNil(t, config.SaramaConfig)
 	assert.False(t, config.WithDlq)
@@ -93,7 +93,7 @@ func TestSetConfig_NoConfig(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, DefaultConfig.Brokers, config.Brokers)
 	assert.Equal(t, DefaultConfig.ProducerTimeout, config.ProducerTimeout)
-	assert.Equal(t, DefaultConfig.ConsumerGroup, config.ConsumerGroup)
+	assert.Equal(t, DefaultConfig.AppName, config.AppName)
 	assert.Equal(t, DefaultConfig.ConsumerTimeout, config.ConsumerTimeout)
 	assert.NotNil(t, config.SaramaConfig)
 	assert.False(t, config.WithDlq)
@@ -106,7 +106,7 @@ func TestSetConfig_EmptyConfig(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, DefaultConfig.Brokers, config.Brokers)
 	assert.Equal(t, DefaultConfig.ProducerTimeout, config.ProducerTimeout)
-	assert.Equal(t, DefaultConfig.ConsumerGroup, config.ConsumerGroup)
+	assert.Equal(t, DefaultConfig.AppName, config.AppName)
 	assert.Equal(t, DefaultConfig.ConsumerTimeout, config.ConsumerTimeout)
 	assert.NotNil(t, config.SaramaConfig)
 }
@@ -122,7 +122,7 @@ func TestSetConfig_PartialConfig(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"custom:9092"}, config.Brokers)
 	assert.Equal(t, 5*time.Second, config.ProducerTimeout)
-	assert.Equal(t, DefaultConfig.ConsumerGroup, config.ConsumerGroup)
+	assert.Equal(t, DefaultConfig.AppName, config.AppName)
 	assert.Equal(t, DefaultConfig.ConsumerTimeout, config.ConsumerTimeout)
 	assert.NotNil(t, config.SaramaConfig)
 }
@@ -192,7 +192,7 @@ func TestSetConfig_AllFields(t *testing.T) {
 	inputConfig := Config{
 		Brokers:         []string{"broker1:9092", "broker2:9092"},
 		ProducerTimeout: 15 * time.Second,
-		ConsumerGroup:   "test-group",
+		AppName:         "test-group",
 		ConsumerTimeout: 20 * time.Second,
 		SaramaConfig:    customSarama,
 		WithDlq:         true,
@@ -204,7 +204,7 @@ func TestSetConfig_AllFields(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, inputConfig.Brokers, config.Brokers)
 	assert.Equal(t, inputConfig.ProducerTimeout, config.ProducerTimeout)
-	assert.Equal(t, inputConfig.ConsumerGroup, config.ConsumerGroup)
+	assert.Equal(t, inputConfig.AppName, config.AppName)
 	assert.Equal(t, inputConfig.ConsumerTimeout, config.ConsumerTimeout)
 	assert.Equal(t, inputConfig.SaramaConfig, config.SaramaConfig)
 	assert.Equal(t, inputConfig.WithDlq, config.WithDlq)
@@ -219,7 +219,7 @@ func TestConfig_DefaultValues(t *testing.T) {
 	// Test that DefaultConfig is properly initialized
 	assert.NotEmpty(t, DefaultConfig.Brokers)
 	assert.Greater(t, DefaultConfig.ProducerTimeout, time.Duration(0))
-	assert.NotEmpty(t, DefaultConfig.ConsumerGroup)
+	assert.NotEmpty(t, DefaultConfig.AppName)
 	assert.Greater(t, DefaultConfig.ConsumerTimeout, time.Duration(0))
 }
 
@@ -227,7 +227,7 @@ func TestSetConfig_ZeroValues(t *testing.T) {
 	inputConfig := Config{
 		Brokers:         []string{}, // Empty slice should be replaced with default
 		ProducerTimeout: 0,          // Zero should be replaced with default
-		ConsumerGroup:   "",         // Empty string should be replaced with default
+		AppName:         "",         // Empty string should be replaced with default
 		ConsumerTimeout: 0,          // Zero should be replaced with default
 		SaramaConfig:    nil,        // Nil should be replaced with default
 	}
@@ -237,7 +237,7 @@ func TestSetConfig_ZeroValues(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, DefaultConfig.Brokers, config.Brokers)
 	assert.Equal(t, DefaultConfig.ProducerTimeout, config.ProducerTimeout)
-	assert.Equal(t, DefaultConfig.ConsumerGroup, config.ConsumerGroup)
+	assert.Equal(t, DefaultConfig.AppName, config.AppName)
 	assert.Equal(t, DefaultConfig.ConsumerTimeout, config.ConsumerTimeout)
 	assert.NotNil(t, config.SaramaConfig)
 }

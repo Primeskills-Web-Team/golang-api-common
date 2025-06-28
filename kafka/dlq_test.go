@@ -35,9 +35,9 @@ func TestSendToDLQ_Success(t *testing.T) {
 
 	kafka := &Kafka{
 		config: Config{
-			WithDlq:       true,
-			Storage:       &storageInterface,
-			ConsumerGroup: "test-group",
+			WithDlq: true,
+			Storage: &storageInterface,
+			AppName: "test-group",
 		},
 	}
 
@@ -103,9 +103,9 @@ func TestSendToDLQ_WithNilHeaders(t *testing.T) {
 
 	kafka := &Kafka{
 		config: Config{
-			WithDlq:       true,
-			Storage:       &storageInterface,
-			ConsumerGroup: "test-group",
+			WithDlq: true,
+			Storage: &storageInterface,
+			AppName: "test-group",
 		},
 	}
 
@@ -149,9 +149,9 @@ func TestSendToDLQ_StorageError(t *testing.T) {
 
 	kafka := &Kafka{
 		config: Config{
-			WithDlq:       true,
-			Storage:       &storageInterface,
-			ConsumerGroup: "test-group",
+			WithDlq: true,
+			Storage: &storageInterface,
+			AppName: "test-group",
 		},
 	}
 
