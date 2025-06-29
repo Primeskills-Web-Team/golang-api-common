@@ -43,6 +43,18 @@ type Config struct {
 	// If WithAlert is true, the client will use the telegram notifier to send alerts when there are errors.
 	// Default: nil
 	TelegramNotifier *telegramnotifier.TelegramNotifier
+
+	// If true, the client will use JWT to secure the messages.
+	// Default: false
+	Secure bool
+
+	// The secret key to use for JWT.
+	// Default: ""
+	SecretKey string
+
+	// The duration of the JWT token.
+	// Default: 24 * time.Hour
+	TokenDuration time.Duration
 }
 
 // DefaultConfig returns a default Kafka configuration.
@@ -56,6 +68,9 @@ var DefaultConfig = Config{
 	Storage:          nil,
 	WithAlert:        false,
 	TelegramNotifier: nil,
+	Secure:           false,
+	SecretKey:        "",
+	TokenDuration:    24 * time.Hour,
 }
 
 // defaultSaramaConfig returns a default sarama kafka configuration.
@@ -101,5 +116,14 @@ func setConfig(config ...Config) (Config, error) {
 	if cfg.WithAlert && cfg.TelegramNotifier == nil {
 		return Config{}, fmt.Errorf("alert is enabled but no telegram notifier configured")
 	}
+
+	if cfg.Secure && cfg.SecretKey == "" {
+		return Config{}, fmt.Errorf("secure is enabled but no secret key configured")
+	}
+
+	if cfg.TokenDuration == 0 {
+		cfg.TokenDuration = DefaultConfig.TokenDuration
+	}
+
 	return cfg, nil
 }
