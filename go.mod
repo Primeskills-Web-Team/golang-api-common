@@ -5,7 +5,6 @@ go 1.24
 require (
 	github.com/IBM/sarama v1.45.1
 	github.com/alicebob/miniredis/v2 v2.33.0
-	github.com/gin-contrib/requestid v1.0.5
 	github.com/gin-gonic/gin v1.10.0
 	github.com/go-playground/locales v0.14.1
 	github.com/go-playground/universal-translator v0.18.1
