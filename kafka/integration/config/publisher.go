@@ -354,10 +354,22 @@ func (k *KafkaConfig) sendToSlack(webhookURL string, message helpers.SlackMessag
 		return fmt.Errorf("failed to marshal Slack message: %w", err)
 	}
 
-	logrus.WithFields(logrus.Fields{
-		"webhook_url":  maskWebhookURL(webhookURL),
-		"message_size": len(jsonData),
-	}).Debug("Sending Slack message")
+	payloadSize := len(jsonData)
+	maxPreviewSize := 1000
+
+	// ✅ Warning jika payload terlalu besar
+	if payloadSize > 30000 {
+		logrus.WithFields(logrus.Fields{
+			"size_bytes": payloadSize,
+			"preview":    string(jsonData[:min(payloadSize, maxPreviewSize)]),
+		}).Warn("⚠️ Slack payload size exceeds safe limit (30KB). Message may be dropped silently.")
+	} else {
+		logrus.WithFields(logrus.Fields{
+			"webhook_url":  maskWebhookURL(webhookURL),
+			"message_size": payloadSize,
+			"preview":      string(jsonData[:min(payloadSize, maxPreviewSize)]),
+		}).Debug("Sending Slack message")
+	}
 
 	// ✅ Create HTTP request
 	req, err := http.NewRequest("POST", webhookURL, bytes.NewBuffer(jsonData))
@@ -370,7 +382,7 @@ func (k *KafkaConfig) sendToSlack(webhookURL string, message helpers.SlackMessag
 
 	// ✅ Send request with timeout
 	client := &http.Client{
-		Timeout: 15 * time.Second, // Increase timeout
+		Timeout: 15 * time.Second,
 	}
 
 	resp, err := client.Do(req)
@@ -382,7 +394,6 @@ func (k *KafkaConfig) sendToSlack(webhookURL string, message helpers.SlackMessag
 	// ✅ Read response body for debugging
 	body, _ := io.ReadAll(resp.Body)
 
-	// ✅ Check response status
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("slack webhook returned status %d: %s", resp.StatusCode, string(body))
 	}
@@ -394,6 +405,14 @@ func (k *KafkaConfig) sendToSlack(webhookURL string, message helpers.SlackMessag
 
 	return nil
 }
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 
 // ✅ Helper untuk mask webhook URL
 func maskWebhookURL(url string) string {
