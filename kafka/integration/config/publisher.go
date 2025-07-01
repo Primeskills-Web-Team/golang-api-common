@@ -409,11 +409,12 @@ func (k *KafkaConfig) buildSlackMessage(alert map[string]interface{}) SlackMessa
 					Short: true,
 				})
 			}
+
 			if data, ok := event["data"]; ok {
 				if marshaled, err := json.MarshalIndent(data, "", "  "); err == nil {
 					fields = append(fields, SlackField{
 						Title: "Event Data",
-						Value: fmt.Sprintf("```json\n%s\n```", marshaled),
+						Value: fmt.Sprintf("```\n%s\n```", marshaled),
 						Short: false,
 					})
 				}
@@ -421,17 +422,19 @@ func (k *KafkaConfig) buildSlackMessage(alert map[string]interface{}) SlackMessa
 		}
 	}
 
+	// ✅ Error message in code block
+	errorText := fmt.Sprintf("```%s```", errorMsg)
+	if severity == "critical" {
+		errorText += "\n\n⚠️ *This is a critical alert requiring immediate attention!*"
+	}
+
 	attachment := SlackAttachment{
 		Color:     color,
 		Title:     fmt.Sprintf("Failed to publish to topic: %s", topic),
-		Text:      fmt.Sprintf("```%s```", errorMsg),
+		Text:      errorText,
 		Timestamp: timestamp.Unix(),
 		Footer:    "Kafka Alert System",
 		Fields:    fields,
-	}
-
-	if severity == "critical" {
-		attachment.Text += "\n\n⚠️ *This is a critical alert requiring immediate attention!*"
 	}
 
 	return SlackMessage{
