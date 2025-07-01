@@ -137,18 +137,17 @@ func createConfig(k *KafkaConfig) *sarama.Config {
 	return config
 }
 
-func NewKafkaConfig(username string, password string, address []string, slackWebhookURL string) *KafkaConfig {
+func NewKafkaConfig(username string, password string, address []string) *KafkaConfig {
 	config := &KafkaConfig{
 		Username:        username,
 		Password:        password,
 		Address:         address,
-		SlackWebhookURL: slackWebhookURL,
 		Config:          DefaultKafkaConfigOptions(),
 		DLQConfig:       DefaultDLQConfig(),
 	}
 
 	// Initialize helpers
-	config.InitializeHelpers(slackWebhookURL)
+	// config.InitializeHelpers(slackWebhookURL)
 
 	return config
 }

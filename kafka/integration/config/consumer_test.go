@@ -11,7 +11,7 @@ import (
 
 func TestAddConsumerListener(t *testing.T) {
 	// Create a test Kafka config
-	kafkaConfig := NewKafkaConfig("test-user", "test-pass", []string{"localhost:9092"}, "")
+	kafkaConfig := NewKafkaConfig("test-user", "test-pass", []string{"localhost:9092"},)
 
 	// Test topics
 	topics := []string{"test-topic"}
@@ -46,7 +46,7 @@ func TestAddConsumerListener(t *testing.T) {
 
 func TestConsumerGroupConfig(t *testing.T) {
 	// Test that the consumer group configuration is properly set
-	kafkaConfig := NewKafkaConfig("test-user", "test-pass", []string{"localhost:9092"}, "")
+	kafkaConfig := NewKafkaConfig("test-user", "test-pass", []string{"localhost:9092"}, )
 
 	config := createConfig(kafkaConfig)
 

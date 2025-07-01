@@ -62,7 +62,7 @@ func setupSlackTest(t *testing.T) *KafkaConfig {
 		kafkaHost = "localhost:9092"
 	}
 
-	return NewKafkaConfig("", "", []string{kafkaHost}, "")
+	return NewKafkaConfig("", "", []string{kafkaHost}, )
 }
 
 // ✅ Helper function untuk mask webhook URL di log
