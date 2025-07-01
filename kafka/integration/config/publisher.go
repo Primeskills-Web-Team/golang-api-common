@@ -346,9 +346,8 @@ func (k *KafkaConfig) sendSlackAlert(alert map[string]interface{}) {
 	}
 }
 
-
 func (k *KafkaConfig) sendToSlack(webhookURL string, message helpers.SlackMessage) error {
-	// ✅ Marshal message to JSON
+
 	jsonData, err := json.Marshal(message)
 	if err != nil {
 		return fmt.Errorf("failed to marshal Slack message: %w", err)
@@ -357,7 +356,13 @@ func (k *KafkaConfig) sendToSlack(webhookURL string, message helpers.SlackMessag
 	payloadSize := len(jsonData)
 	maxPreviewSize := 1000
 
-	// ✅ Warning jika payload terlalu besar
+	logrus.WithFields(logrus.Fields{
+		"webhook_url":  maskWebhookURL(webhookURL),
+		"payload_size": payloadSize,
+		"environment":  os.Getenv("ENVIRONMENT"),
+		"channel":      message.Channel,
+	}).Info("Sending Slack message")
+
 	if payloadSize > 30000 {
 		logrus.WithFields(logrus.Fields{
 			"size_bytes": payloadSize,
@@ -368,10 +373,9 @@ func (k *KafkaConfig) sendToSlack(webhookURL string, message helpers.SlackMessag
 			"webhook_url":  maskWebhookURL(webhookURL),
 			"message_size": payloadSize,
 			"preview":      string(jsonData[:min(payloadSize, maxPreviewSize)]),
-		}).Debug("Sending Slack message")
+		}).Debug("Sending Slack message payload")
 	}
 
-	// ✅ Create HTTP request
 	req, err := http.NewRequest("POST", webhookURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return fmt.Errorf("failed to create HTTP request: %w", err)
@@ -380,28 +384,64 @@ func (k *KafkaConfig) sendToSlack(webhookURL string, message helpers.SlackMessag
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "Kafka-Alert-Bot/1.0")
 
-	// ✅ Send request with timeout
 	client := &http.Client{
-		Timeout: 15 * time.Second,
+		Timeout: 30 * time.Second, // Perbesar timeout
+		Transport: &http.Transport{
+			IdleConnTimeout:       10 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ResponseHeaderTimeout: 10 * time.Second,
+		},
 	}
 
+	// ✅ Log sebelum request
+	logrus.Info("Sending HTTP request to Slack...")
+
+	start := time.Now()
 	resp, err := client.Do(req)
+	duration := time.Since(start)
+
 	if err != nil {
+		logrus.WithFields(logrus.Fields{
+			"error":       err.Error(),
+			"duration_ms": duration.Milliseconds(),
+		}).Error("HTTP request failed")
 		return fmt.Errorf("failed to send HTTP request: %w", err)
 	}
 	defer resp.Body.Close()
 
-	// ✅ Read response body for debugging
 	body, _ := io.ReadAll(resp.Body)
 
+	logrus.WithFields(logrus.Fields{
+		"status_code":    resp.StatusCode,
+		"response_body":  string(body),
+		"content_length": resp.ContentLength,
+		"duration_ms":    duration.Milliseconds(),
+		"response_headers": map[string]string{
+			"content-type": resp.Header.Get("Content-Type"),
+			"server":       resp.Header.Get("Server"),
+			"date":         resp.Header.Get("Date"),
+		},
+	}).Info("Slack webhook response details")
+
 	if resp.StatusCode != http.StatusOK {
+		logrus.WithFields(logrus.Fields{
+			"status_code": resp.StatusCode,
+			"response":    string(body),
+		}).Error("Slack webhook returned non-200 status")
 		return fmt.Errorf("slack webhook returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	responseStr := string(body)
+	if strings.Contains(strings.ToLower(responseStr), "error") ||
+		strings.Contains(strings.ToLower(responseStr), "invalid") {
+		logrus.WithField("response", responseStr).Warn("Slack response contains potential error")
 	}
 
 	logrus.WithFields(logrus.Fields{
 		"status_code": resp.StatusCode,
+		"duration_ms": duration.Milliseconds(),
 		"response":    string(body),
-	}).Debug("Slack message sent successfully")
+	}).Info("✅ Slack message sent successfully")
 
 	return nil
 }
@@ -412,7 +452,6 @@ func min(a, b int) int {
 	}
 	return b
 }
-
 
 // ✅ Helper untuk mask webhook URL
 func maskWebhookURL(url string) string {
