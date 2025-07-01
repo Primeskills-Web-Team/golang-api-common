@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+	"github.com/sirupsen/logrus"
 )
 
 // SlackMessage represents a Slack message structure
@@ -181,8 +182,21 @@ func (s *SlackHelper) SendToSlack(webhookURL string, message SlackMessage) error
 		return fmt.Errorf("failed to marshal Slack message: %w", err)
 	}
 
-	fmt.Printf("Sending Slack message to: %s, size: %d bytes\n",
-		MaskWebhookURL(webhookURL), len(jsonData))
+	payloadSize := len(jsonData)
+	maxPreviewSize := 1000
+
+	if payloadSize > 30000 {
+		logrus.WithFields(logrus.Fields{
+			"size_bytes": payloadSize,
+			"preview":    string(jsonData[:min(payloadSize, maxPreviewSize)]),
+		}).Warn("⚠️ Slack payload size exceeds safe limit (30KB). Message may be dropped silently.")
+	} else {
+		logrus.WithFields(logrus.Fields{
+			"webhook_url":  MaskWebhookURL(webhookURL),
+			"message_size": payloadSize,
+			"preview":      string(jsonData[:min(payloadSize, maxPreviewSize)]),
+		}).Debug("Sending Slack message")
+	}
 
 	req, err := http.NewRequest("POST", webhookURL, bytes.NewBuffer(jsonData))
 	if err != nil {
@@ -208,8 +222,19 @@ func (s *SlackHelper) SendToSlack(webhookURL string, message SlackMessage) error
 		return fmt.Errorf("slack webhook returned status %d: %s", resp.StatusCode, string(body))
 	}
 
-	fmt.Printf("Slack message sent successfully, status: %d\n", resp.StatusCode)
+	logrus.WithFields(logrus.Fields{
+		"status_code": resp.StatusCode,
+		"response":    string(body),
+	}).Debug("Slack message sent successfully")
+
 	return nil
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // SendSlackAlert sends alert to Slack (main function)
