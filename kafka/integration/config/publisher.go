@@ -19,52 +19,51 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/Primeskills-Web-Team/golang-api-common/kafka/helpers"
-
 )
 
 func DefaultRetryConfig() RetryConfig {
-    return RetryConfig{
-        MaxRetries:    3,
-        RetryInterval: time.Second * 2,
-        BackoffFactor: 2.0,
-    }
+	return RetryConfig{
+		MaxRetries:    3,
+		RetryInterval: time.Second * 2,
+		BackoffFactor: 2.0,
+	}
 }
 
 func (k *KafkaConfig) PublishEventWithRetry(ctx context.Context, topic string, value kafka.Event, retryConfig RetryConfig) (*PublishResult, error) {
-    var lastErr error
+	var lastErr error
 
-    for attempt := 0; attempt <= retryConfig.MaxRetries; attempt++ {
-        if attempt > 0 {
-            delay := time.Duration(float64(retryConfig.RetryInterval) *
-                math.Pow(retryConfig.BackoffFactor, float64(attempt-1)))
+	for attempt := 0; attempt <= retryConfig.MaxRetries; attempt++ {
+		if attempt > 0 {
+			delay := time.Duration(float64(retryConfig.RetryInterval) *
+				math.Pow(retryConfig.BackoffFactor, float64(attempt-1)))
 
-            logrus.Warnf("Retrying publish to topic %s, attempt %d/%d after %v",
-                topic, attempt, retryConfig.MaxRetries, delay)
+			logrus.Warnf("Retrying publish to topic %s, attempt %d/%d after %v",
+				topic, attempt, retryConfig.MaxRetries, delay)
 
-            select {
-            case <-ctx.Done():
-                return nil, ctx.Err()
-            case <-time.After(delay):
-            }
-        }
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(delay):
+			}
+		}
 
-        result, err := k.publishEventOnce(topic, value)
-        if err == nil {
-            if attempt > 0 {
-                logrus.Infof("Successfully published to topic %s after %d retries", topic, attempt)
-            }
-            return result, nil
-        }
+		result, err := k.publishEventOnce(topic, value)
+		if err == nil {
+			if attempt > 0 {
+				logrus.Infof("Successfully published to topic %s after %d retries", topic, attempt)
+			}
+			return result, nil
+		}
 
-        lastErr = err
-        logrus.Errorf("Attempt %d failed to publish to topic %s: %v", attempt+1, topic, err)
+		lastErr = err
+		logrus.Errorf("Attempt %d failed to publish to topic %s: %v", attempt+1, topic, err)
 
-        if helpers.IsConnectionError(err) {
-            k.resetProducer()
-        }
-    }
+		if helpers.IsConnectionError(err) {
+			k.resetProducer()
+		}
+	}
 
-    return nil, fmt.Errorf("failed to publish after %d attempts, last error: %w", retryConfig.MaxRetries+1, lastErr)
+	return nil, fmt.Errorf("failed to publish after %d attempts, last error: %w", retryConfig.MaxRetries+1, lastErr)
 }
 
 func (k *KafkaConfig) publishEventOnce(topic string, value kafka.Event) (*PublishResult, error) {
@@ -151,10 +150,10 @@ func (k *KafkaConfig) handlePublishFailure(topic string, value kafka.Event, err 
 	k.storeToDeadLetterQueue(topic, value, err)
 
 	// ✅ 3. Send to monitoring/alerting system - ENABLED
-	k.sendAlert("kafka_publish_failed", topic, err)
+	k.sendAlert("kafka_publish_failed", topic, err, value)
 
-	 // Write to file for later processing
-    helpers.WriteToFailureLog(topic, value, err, k.Address, k.Username)
+	// Write to file for later processing
+	helpers.WriteToFailureLog(topic, value, err, k.Address, k.Username)
 
 }
 
@@ -176,108 +175,110 @@ func (k *KafkaConfig) EnableDLQ() {
 }
 
 func (k *KafkaConfig) storeToDeadLetterQueue(topic string, value kafka.Event, originalErr error) {
-    if !k.DLQConfig.Enabled {
-        logrus.Debug("DLQ is disabled, skipping dead letter storage")
-        return
-    }
+	if !k.DLQConfig.Enabled {
+		logrus.Debug("DLQ is disabled, skipping dead letter storage")
+		return
+	}
 
-    deadLetterTopic := fmt.Sprintf("%s%s", topic, k.DLQConfig.DeadLetterSuffix)
+	deadLetterTopic := fmt.Sprintf("%s%s", topic, k.DLQConfig.DeadLetterSuffix)
 
-    // Check for duplicate failures
-    messageKey := helpers.GenerateMessageKey(topic, value)
-    if k.DLQConfig.EnableDeduplication && k.dlqHelper.IsDuplicateFailure(messageKey) {
-        logrus.WithField("message_key", messageKey).Warn("Duplicate failure detected, skipping DLQ")
-        return
-    }
+	// Check for duplicate failures
+	messageKey := helpers.GenerateMessageKey(topic, value)
+	if k.DLQConfig.EnableDeduplication && k.dlqHelper.IsDuplicateFailure(messageKey) {
+		logrus.WithField("message_key", messageKey).Warn("Duplicate failure detected, skipping DLQ")
+		return
+	}
 
-    // Mark as processing
-    if k.DLQConfig.EnableDeduplication {
-        k.dlqHelper.MarkFailureProcessing(messageKey)
-        defer k.dlqHelper.ClearFailureProcessing(messageKey)
-    }
+	// Mark as processing
+	if k.DLQConfig.EnableDeduplication {
+		k.dlqHelper.MarkFailureProcessing(messageKey)
+		defer k.dlqHelper.ClearFailureProcessing(messageKey)
+	}
 
-    // Create enhanced dead letter event
-    deadLetterEvent := k.dlqHelper.CreateDeadLetterEvent(topic, value, originalErr, k.Address, k.Username)
+	// Create enhanced dead letter event
+	deadLetterEvent := k.dlqHelper.CreateDeadLetterEvent(topic, value, originalErr, k.Address, k.Username)
 
-    // Retry logic with exponential backoff
-    k.retryPublishToDeadLetter(deadLetterTopic, deadLetterEvent, topic, value, originalErr)
+	// Retry logic with exponential backoff
+	k.retryPublishToDeadLetter(deadLetterTopic, deadLetterEvent, topic, value, originalErr)
 }
 
-func (k *KafkaConfig) sendAlert(alertType, topic string, err error) {
-    alert := k.dlqHelper.CreateFailureAlert(alertType, topic, err, k.Address)
+func (k *KafkaConfig) sendAlert(alertType, topic string, err error, event kafka.Event) {
+	eventMap := make(map[string]interface{})
+	if raw, marshalErr := json.Marshal(event); marshalErr == nil {
+		_ = json.Unmarshal(raw, &eventMap)
+	}
 
-    // Send to multiple monitoring systems (async)
-    go func() {
-        defer func() {
-            if r := recover(); r != nil {
-                logrus.WithField("panic", r).Error("Panic while sending alert")
-            }
-        }()
+	alert := k.dlqHelper.CreateFailureAlert(alertType, topic, err, k.Address, eventMap)
 
-        // Send to Slack
-        k.slackHelper.SendSlackAlert(alert)
-    }()
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logrus.WithField("panic", r).Error("Panic while sending alert")
+			}
+		}()
+
+		// Send to Slack
+		k.slackHelper.SendSlackAlert(alert)
+	}()
 }
-
 
 func (k *KafkaConfig) retryPublishToDeadLetter(deadLetterTopic string, deadLetterEvent kafka.Event, originalTopic string, originalValue kafka.Event, originalErr error) {
-    go func() {
-        defer func() {
-            if r := recover(); r != nil {
-                logrus.WithFields(logrus.Fields{
-                    "panic": r,
-                    "topic": deadLetterTopic,
-                }).Error("Panic in DLQ retry goroutine")
-                helpers.WriteToFailureLog(fmt.Sprintf("%s-dlq-panic", originalTopic), originalValue, fmt.Errorf("panic in DLQ: %v", r), k.Address, k.Username)
-            }
-        }()
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logrus.WithFields(logrus.Fields{
+					"panic": r,
+					"topic": deadLetterTopic,
+				}).Error("Panic in DLQ retry goroutine")
+				helpers.WriteToFailureLog(fmt.Sprintf("%s-dlq-panic", originalTopic), originalValue, fmt.Errorf("panic in DLQ: %v", r), k.Address, k.Username)
+			}
+		}()
 
-        var lastErr error
-        delay := k.DLQConfig.RetryDelay
+		var lastErr error
+		delay := k.DLQConfig.RetryDelay
 
-        for attempt := 0; attempt < k.DLQConfig.MaxRetries; attempt++ {
-            if eventData, ok := deadLetterEvent.Data.(map[string]interface{}); ok {
-                eventData["retry_count"] = attempt
-                eventData["retry_timestamp"] = time.Now().Unix()
-            }
+		for attempt := 0; attempt < k.DLQConfig.MaxRetries; attempt++ {
+			if eventData, ok := deadLetterEvent.Data.(map[string]interface{}); ok {
+				eventData["retry_count"] = attempt
+				eventData["retry_timestamp"] = time.Now().Unix()
+			}
 
-            _, err := k.publishEventOnce(deadLetterTopic, deadLetterEvent)
+			_, err := k.publishEventOnce(deadLetterTopic, deadLetterEvent)
 
-            if err == nil {
-                logrus.WithFields(logrus.Fields{
-                    "dead_letter_topic": deadLetterTopic,
-                    "attempt":           attempt + 1,
-                    "original_topic":    originalTopic,
-                }).Info("Successfully stored to dead letter queue")
+			if err == nil {
+				logrus.WithFields(logrus.Fields{
+					"dead_letter_topic": deadLetterTopic,
+					"attempt":           attempt + 1,
+					"original_topic":    originalTopic,
+				}).Info("Successfully stored to dead letter queue")
 
-                if attempt > 0 {
-                    k.sendDLQRecoveryAlert(deadLetterTopic, attempt)
-                }
-                return
-            }
+				if attempt > 0 {
+					k.sendDLQRecoveryAlert(deadLetterTopic, attempt)
+				}
+				return
+			}
 
-            lastErr = err
-            logrus.WithFields(logrus.Fields{
-                "attempt":           attempt + 1,
-                "max_retries":       k.DLQConfig.MaxRetries,
-                "delay":             delay,
-                "error":             err.Error(),
-                "dead_letter_topic": deadLetterTopic,
-            }).Warn("Failed to publish to dead letter queue, retrying...")
-        }
+			lastErr = err
+			logrus.WithFields(logrus.Fields{
+				"attempt":           attempt + 1,
+				"max_retries":       k.DLQConfig.MaxRetries,
+				"delay":             delay,
+				"error":             err.Error(),
+				"dead_letter_topic": deadLetterTopic,
+			}).Warn("Failed to publish to dead letter queue, retrying...")
+		}
 
-        logrus.WithFields(logrus.Fields{
-            "dead_letter_topic": deadLetterTopic,
-            "original_topic":    originalTopic,
-            "final_error":       lastErr.Error(),
-            "retries":           k.DLQConfig.MaxRetries,
-        }).Error("Failed to store to dead letter queue after all retries")
+		logrus.WithFields(logrus.Fields{
+			"dead_letter_topic": deadLetterTopic,
+			"original_topic":    originalTopic,
+			"final_error":       lastErr.Error(),
+			"retries":           k.DLQConfig.MaxRetries,
+		}).Error("Failed to store to dead letter queue after all retries")
 
-        // Use helper for failure fallback
-        helpers.LogFailureFallback(originalTopic, originalValue, originalErr, lastErr, k.Address, k.Username)
-    }()
+		// Use helper for failure fallback
+		helpers.LogFailureFallback(originalTopic, originalValue, originalErr, lastErr, k.Address, k.Username)
+	}()
 }
-
 
 func (k *KafkaConfig) TestDLQ() error {
 	if !k.DLQConfig.Enabled {
@@ -304,16 +305,14 @@ func (k *KafkaConfig) TestDLQ() error {
 	return nil
 }
 
-
 func (k *KafkaConfig) sendDLQRecoveryAlert(deadLetterTopic string, attempts int) {
-    recoveryAlert := k.dlqHelper.CreateDLQRecoveryAlert(deadLetterTopic, attempts, k.Address)
-    
-    k.slackHelper.SendSlackAlert(recoveryAlert)
+	recoveryAlert := k.dlqHelper.CreateDLQRecoveryAlert(deadLetterTopic, attempts, k.Address)
+
+	k.slackHelper.SendSlackAlert(recoveryAlert)
 }
 
 func (k *KafkaConfig) sendSlackAlert(alert map[string]interface{}) {
 
-	
 	slackWebhook := k.SlackWebhookURL
 
 	if slackWebhook == "" {
@@ -348,65 +347,89 @@ func (k *KafkaConfig) sendSlackAlert(alert map[string]interface{}) {
 }
 
 func (k *KafkaConfig) buildSlackMessage(alert map[string]interface{}) SlackMessage {
-
 	severity := alert["severity"].(string)
 	topic := alert["topic"].(string)
 	errorMsg := alert["error"].(string)
 	timestamp := alert["timestamp"].(time.Time)
 
-	// ✅ Determine color based on severity
 	color := k.slackHelper.GetSlackColor(severity)
-
-	// ✅ Build main message
 	mainText := fmt.Sprintf("🚨 *Kafka Failure Alert* - %s", strings.ToUpper(severity))
 
-	// ✅ Build attachment with detailed info
+	fields := []SlackField{
+		{
+			Title: "Service",
+			Value: getEnvOrDefault("APP_NAME", "unknown-service"),
+			Short: true,
+		},
+		{
+			Title: "Environment",
+			Value: getEnvOrDefault("ENVIRONMENT", "unknown"),
+			Short: true,
+		},
+		{
+			Title: "Topic",
+			Value: topic,
+			Short: true,
+		},
+		{
+			Title: "Severity",
+			Value: strings.ToUpper(severity),
+			Short: true,
+		},
+		{
+			Title: "Kafka Hosts",
+			Value: fmt.Sprintf("%v", alert["kafka_hosts"]),
+			Short: false,
+		},
+		{
+			Title: "Timestamp",
+			Value: timestamp.Format("2006-01-02 15:04:05 MST"),
+			Short: true,
+		},
+		{
+			Title: "Alert Type",
+			Value: fmt.Sprintf("%s", alert["alert_type"]),
+			Short: true,
+		},
+	}
+
+	if eventRaw, ok := alert["event"]; ok {
+		if event, ok := eventRaw.(map[string]interface{}); ok {
+			if eventName, ok := event["event_name"].(string); ok {
+				fields = append(fields, SlackField{
+					Title: "Event Name",
+					Value: eventName,
+					Short: true,
+				})
+			}
+			if source, ok := event["source"].(string); ok {
+				fields = append(fields, SlackField{
+					Title: "Event Source",
+					Value: source,
+					Short: true,
+				})
+			}
+			if data, ok := event["data"]; ok {
+				if marshaled, err := json.MarshalIndent(data, "", "  "); err == nil {
+					fields = append(fields, SlackField{
+						Title: "Event Data",
+						Value: fmt.Sprintf("```json\n%s\n```", marshaled),
+						Short: false,
+					})
+				}
+			}
+		}
+	}
+
 	attachment := SlackAttachment{
 		Color:     color,
 		Title:     fmt.Sprintf("Failed to publish to topic: %s", topic),
 		Text:      fmt.Sprintf("```%s```", errorMsg),
 		Timestamp: timestamp.Unix(),
 		Footer:    "Kafka Alert System",
-		Fields: []SlackField{
-			{
-				Title: "Service",
-				Value: getEnvOrDefault("APP_NAME", "unknown-service"),
-				Short: true,
-			},
-			{
-				Title: "Environment",
-				Value: getEnvOrDefault("ENVIRONMENT", "unknown"),
-				Short: true,
-			},
-			{
-				Title: "Topic",
-				Value: topic,
-				Short: true,
-			},
-			{
-				Title: "Severity",
-				Value: strings.ToUpper(severity),
-				Short: true,
-			},
-			{
-				Title: "Kafka Hosts",
-				Value: fmt.Sprintf("%v", alert["kafka_hosts"]),
-				Short: false,
-			},
-			{
-				Title: "Timestamp",
-				Value: timestamp.Format("2006-01-02 15:04:05 MST"),
-				Short: true,
-			},
-			{
-				Title: "Alert Type",
-				Value: fmt.Sprintf("%s", alert["alert_type"]),
-				Short: true,
-			},
-		},
+		Fields:    fields,
 	}
 
-	// ✅ Add action buttons for critical alerts
 	if severity == "critical" {
 		attachment.Text += "\n\n⚠️ *This is a critical alert requiring immediate attention!*"
 	}
@@ -484,20 +507,19 @@ func maskWebhookURL(url string) string {
 	return "***MASKED***"
 }
 
-
 func (k *KafkaConfig) SendRecoveryAlert(topic string) {
-    // Create recovery message using helper
-    message := helpers.CreateRecoveryMessage(topic, k.Address)
-    
-    // Send using Slack helper
-    webhookURL := k.SlackWebhookURL
-    if webhookURL == "" {
-        webhookURL = os.Getenv("SLACK_WEBHOOK_URL")
-    }
-    
-    if webhookURL != "" && k.slackHelper.IsSlackEnabled() {
-        k.slackHelper.SendToSlack(webhookURL, message)
-    }
+	// Create recovery message using helper
+	message := helpers.CreateRecoveryMessage(topic, k.Address)
+
+	// Send using Slack helper
+	webhookURL := k.SlackWebhookURL
+	if webhookURL == "" {
+		webhookURL = os.Getenv("SLACK_WEBHOOK_URL")
+	}
+
+	if webhookURL != "" && k.slackHelper.IsSlackEnabled() {
+		k.slackHelper.SendToSlack(webhookURL, message)
+	}
 }
 
 func (k *KafkaConfig) IsDeadLetterTopicAvailable(topic string) bool {
@@ -524,7 +546,6 @@ func (k *KafkaConfig) IsDeadLetterTopicAvailable(topic string) bool {
 	return true
 }
 
-
 func (k *KafkaConfig) getOrCreateProducer() (sarama.SyncProducer, error) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
@@ -544,7 +565,6 @@ func (k *KafkaConfig) getOrCreateProducer() (sarama.SyncProducer, error) {
 	}
 	return k.producer, nil
 }
-
 
 func (k *KafkaConfig) resetProducer() {
 	k.mu.Lock()

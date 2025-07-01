@@ -83,7 +83,12 @@ func (d *DLQHelper) CreateDLQRecoveryAlert(deadLetterTopic string, attempts int,
 	}
 }
 
-func (d *DLQHelper) CreateFailureAlert(alertType, topic string, err error, kafkaAddresses []string) map[string]interface{} {
+func (d *DLQHelper) CreateFailureAlert(
+	alertType, topic string,
+	err error,
+	kafkaAddresses []string,
+	event map[string]interface{},
+) map[string]interface{} {
 	return map[string]interface{}{
 		"alert_type":  alertType,
 		"topic":       topic,
@@ -93,8 +98,10 @@ func (d *DLQHelper) CreateFailureAlert(alertType, topic string, err error, kafka
 		"service":     d.AppConfig.AppName,
 		"environment": d.AppConfig.Environment,
 		"kafka_hosts": kafkaAddresses,
+		"event":       event,
 	}
 }
+
 
 // LogFailureFallback logs when fallback mechanisms are executed
 func LogFailureFallback(topic string, value kafka.Event, originalErr error, dlqErr error, kafkaAddresses []string, kafkaUsername string) {
