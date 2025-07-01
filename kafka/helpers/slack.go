@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -173,29 +174,104 @@ func (s *SlackHelper) BuildSlackMessage(alert map[string]interface{}) SlackMessa
 	}
 }
 
+func debugEnvironmentVariables() {
+	webhookURL := os.Getenv("SLACK_WEBHOOK_URL")
+
+	logrus.WithFields(logrus.Fields{
+		"webhook_length": len(webhookURL),
+		"webhook_prefix": webhookURL[:min(len(webhookURL), 50)],   // First 50 chars
+		"webhook_suffix": webhookURL[max(0, len(webhookURL)-20):], // Last 20 chars
+		"has_newline":    strings.Contains(webhookURL, "\n"),
+		"has_carriage":   strings.Contains(webhookURL, "\r"),
+		"has_tab":        strings.Contains(webhookURL, "\t"),
+		"has_space":      strings.Contains(webhookURL, " "),
+		"environment":    os.Getenv("ENVIRONMENT"),
+		"alert_enabled":  os.Getenv("ALERT_ENABLED"),
+		"slack_channel":  os.Getenv("SLACK_CHANNEL"),
+	}).Info("Environment variable analysis")
+
+	
+	for i, char := range webhookURL {
+		if char < 32 || char > 126 {
+			logrus.WithFields(logrus.Fields{
+				"position":  i,
+				"char_code": int(char),
+				"char_hex":  fmt.Sprintf("0x%02X", char),
+			}).Warn("Found non-printable character in webhook URL")
+		}
+	}
+}
+
+func cleanWebhookURL(rawURL string) string {
+	// Remove common problematic characters
+	cleaned := strings.TrimSpace(rawURL)
+	cleaned = strings.ReplaceAll(cleaned, "\n", "")
+	cleaned = strings.ReplaceAll(cleaned, "\r", "")
+	cleaned = strings.ReplaceAll(cleaned, "\t", "")
+
+	if cleaned != rawURL {
+		logrus.WithFields(logrus.Fields{
+			"original_length": len(rawURL),
+			"cleaned_length":  len(cleaned),
+		}).Warn("Webhook URL contained whitespace/control characters - cleaned")
+	}
+
+	return cleaned
+}
+
 func (s *SlackHelper) SendToSlack(webhookURL string, message SlackMessage) error {
+	// ✅ VALIDASI WEBHOOK URL DETAIL
+	logrus.WithFields(logrus.Fields{
+		"webhook_raw": webhookURL,
+		"webhook_len": len(webhookURL),
+		"environment": os.Getenv("ENVIRONMENT"),
+	}).Info("Webhook URL validation")
+
+	if !strings.HasPrefix(webhookURL, "https://hooks.slack.com/services/") {
+		return fmt.Errorf("invalid Slack webhook URL format: %s", MaskWebhookURL(webhookURL))
+	}
+
+	parsedURL, err := url.Parse(webhookURL)
+	if err != nil {
+		return fmt.Errorf("failed to parse webhook URL: %w", err)
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"host":   parsedURL.Host,
+		"path":   parsedURL.Path,
+		"scheme": parsedURL.Scheme,
+	}).Info("Parsed webhook URL")
+
+	// ✅ Marshal SlackMessage to JSON
 	jsonData, err := json.Marshal(message)
 	if err != nil {
 		return fmt.Errorf("failed to marshal Slack message: %w", err)
 	}
 
+	payloadSize := len(jsonData)
+
 	logrus.WithFields(logrus.Fields{
 		"webhook_url":  MaskWebhookURL(webhookURL),
-		"payload_size": len(jsonData),
+		"payload_size": payloadSize,
 		"environment":  os.Getenv("ENVIRONMENT"),
 		"channel":      message.Channel,
 	}).Info("Sending Slack message")
 
+	// ✅ Create HTTP request
 	req, err := http.NewRequest("POST", webhookURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return fmt.Errorf("failed to create HTTP request: %w", err)
 	}
-
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "Kafka-Alert-Bot/1.0")
 
 	client := &http.Client{
 		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			IdleConnTimeout:       10 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ResponseHeaderTimeout: 10 * time.Second,
+		},
 	}
 
 	start := time.Now()
@@ -212,10 +288,11 @@ func (s *SlackHelper) SendToSlack(webhookURL string, message SlackMessage) error
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
+	responseStr := string(body)
 
 	logrus.WithFields(logrus.Fields{
 		"status_code":    resp.StatusCode,
-		"response_body":  string(body),
+		"response_body":  responseStr,
 		"content_length": resp.ContentLength,
 		"duration_ms":    duration.Milliseconds(),
 		"response_headers": map[string]string{
@@ -225,28 +302,33 @@ func (s *SlackHelper) SendToSlack(webhookURL string, message SlackMessage) error
 		},
 	}).Info("Slack webhook response details")
 
+	if strings.HasPrefix(responseStr, "<!DOCTYPE html") || strings.Contains(responseStr, "<html") {
+		logrus.WithFields(logrus.Fields{
+			"response_preview": responseStr[:min(len(responseStr), 200)],
+		}).Error("🚨 Received HTML response instead of JSON - Wrong endpoint or URL issue!")
+		return fmt.Errorf("webhook returned HTML page instead of JSON response - check URL validity")
+	}
+
 	if resp.StatusCode != http.StatusOK {
 		logrus.WithFields(logrus.Fields{
 			"status_code": resp.StatusCode,
-			"response":    string(body),
+			"response":    responseStr,
 		}).Error("Slack webhook returned non-200 status")
-		return fmt.Errorf("slack webhook returned status %d: %s", resp.StatusCode, string(body))
+		return fmt.Errorf("slack webhook returned status %d: %s", resp.StatusCode, responseStr)
 	}
 
-	responseStr := string(body)
-	if strings.Contains(strings.ToLower(responseStr), "error") ||
-		strings.Contains(strings.ToLower(responseStr), "invalid") {
-		logrus.WithField("response", responseStr).Warn("Slack response contains potential error")
+	if responseStr != "ok" {
+		logrus.WithField("unexpected_response", responseStr).Warn("Unexpected Slack response format")
 	}
 
 	logrus.WithFields(logrus.Fields{
 		"status_code": resp.StatusCode,
 		"duration_ms": duration.Milliseconds(),
+		"response":    responseStr,
 	}).Info("✅ Slack message sent successfully")
 
 	return nil
 }
-
 
 func min(a, b int) int {
 	if a < b {
@@ -257,37 +339,45 @@ func min(a, b int) int {
 
 // SendSlackAlert sends alert to Slack (main function)
 func (s *SlackHelper) SendSlackAlert(alert map[string]interface{}) {
+	// ✅ Debug environment di awal
+	debugEnvironmentVariables()
+
 	if !s.IsSlackEnabled() {
+		logrus.Warn("Slack is not enabled")
 		return
 	}
 
-	// Get webhook URL priority: 1. From constructor, 2. From environment
 	webhookURL := s.webhookURL
 	if webhookURL == "" {
 		webhookURL = os.Getenv("SLACK_WEBHOOK_URL")
 	}
 
 	if webhookURL == "" {
-		fmt.Println("SLACK_WEBHOOK_URL not configured, skipping Slack alert")
+		logrus.Error("SLACK_WEBHOOK_URL not configured, skipping Slack alert")
 		return
 	}
+
+	// ✅ CLEAN WEBHOOK URL
+	webhookURL = cleanWebhookURL(webhookURL)
 
 	// Check if alerts enabled
 	alertEnabled := os.Getenv("ALERT_ENABLED")
 	if alertEnabled != "true" && alertEnabled != "1" {
-		fmt.Println("Slack alerts disabled, skipping")
+		logrus.WithField("alert_enabled", alertEnabled).Warn("Slack alerts disabled, skipping")
 		return
 	}
 
-	fmt.Printf("Preparing to send Slack alert for topic: %v\n", alert["topic"])
+	logrus.WithField("topic", alert["topic"]).Info("Preparing to send Slack alert")
 
 	// Build and send message
 	message := s.BuildSlackMessage(alert)
 	if err := s.SendToSlack(webhookURL, message); err != nil {
-		fmt.Printf("Failed to send Slack alert: %v\n", err)
+		logrus.WithError(err).Error("Failed to send Slack alert")
 	} else {
-		fmt.Printf("✅ Successfully sent Slack alert for topic: %v, severity: %v\n",
-			alert["topic"], alert["severity"])
+		logrus.WithFields(logrus.Fields{
+			"topic":    alert["topic"],
+			"severity": alert["severity"],
+		}).Info("✅ Successfully sent Slack alert")
 	}
 }
 

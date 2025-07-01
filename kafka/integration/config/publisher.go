@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -348,14 +349,38 @@ func (k *KafkaConfig) sendSlackAlert(alert map[string]interface{}) {
 
 func (k *KafkaConfig) sendToSlack(webhookURL string, message helpers.SlackMessage) error {
 
+	logrus.WithFields(logrus.Fields{
+		"webhook_raw": webhookURL, 
+		"webhook_len": len(webhookURL),
+		"environment": os.Getenv("ENVIRONMENT"),
+	}).Info("Webhook URL validation")
+
+	// Validasi format URL
+	if !strings.HasPrefix(webhookURL, "https://hooks.slack.com/services/") {
+		return fmt.Errorf("invalid Slack webhook URL format: %s", maskWebhookURL(webhookURL))
+	}
+
+	// Parse URL untuk memastikan valid
+	parsedURL, err := url.Parse(webhookURL)
+	if err != nil {
+		return fmt.Errorf("failed to parse webhook URL: %w", err)
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"host": parsedURL.Host,
+		"path": parsedURL.Path,
+		"scheme": parsedURL.Scheme,
+	}).Info("Parsed webhook URL")
+
+	// ✅ Marshal message to JSON
 	jsonData, err := json.Marshal(message)
 	if err != nil {
 		return fmt.Errorf("failed to marshal Slack message: %w", err)
 	}
 
 	payloadSize := len(jsonData)
-	maxPreviewSize := 1000
 
+	// ✅ Enhanced logging dengan environment info
 	logrus.WithFields(logrus.Fields{
 		"webhook_url":  maskWebhookURL(webhookURL),
 		"payload_size": payloadSize,
@@ -363,19 +388,7 @@ func (k *KafkaConfig) sendToSlack(webhookURL string, message helpers.SlackMessag
 		"channel":      message.Channel,
 	}).Info("Sending Slack message")
 
-	if payloadSize > 30000 {
-		logrus.WithFields(logrus.Fields{
-			"size_bytes": payloadSize,
-			"preview":    string(jsonData[:min(payloadSize, maxPreviewSize)]),
-		}).Warn("⚠️ Slack payload size exceeds safe limit (30KB). Message may be dropped silently.")
-	} else {
-		logrus.WithFields(logrus.Fields{
-			"webhook_url":  maskWebhookURL(webhookURL),
-			"message_size": payloadSize,
-			"preview":      string(jsonData[:min(payloadSize, maxPreviewSize)]),
-		}).Debug("Sending Slack message payload")
-	}
-
+	// ✅ Create HTTP request
 	req, err := http.NewRequest("POST", webhookURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return fmt.Errorf("failed to create HTTP request: %w", err)
@@ -384,17 +397,15 @@ func (k *KafkaConfig) sendToSlack(webhookURL string, message helpers.SlackMessag
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "Kafka-Alert-Bot/1.0")
 
+	// ✅ Enhanced HTTP client
 	client := &http.Client{
-		Timeout: 30 * time.Second, // Perbesar timeout
+		Timeout: 30 * time.Second,
 		Transport: &http.Transport{
 			IdleConnTimeout:       10 * time.Second,
 			TLSHandshakeTimeout:   10 * time.Second,
 			ResponseHeaderTimeout: 10 * time.Second,
 		},
 	}
-
-	// ✅ Log sebelum request
-	logrus.Info("Sending HTTP request to Slack...")
 
 	start := time.Now()
 	resp, err := client.Do(req)
@@ -411,6 +422,7 @@ func (k *KafkaConfig) sendToSlack(webhookURL string, message helpers.SlackMessag
 
 	body, _ := io.ReadAll(resp.Body)
 
+	// ✅ **ENHANCED RESPONSE VALIDATION**
 	logrus.WithFields(logrus.Fields{
 		"status_code":    resp.StatusCode,
 		"response_body":  string(body),
@@ -423,6 +435,16 @@ func (k *KafkaConfig) sendToSlack(webhookURL string, message helpers.SlackMessag
 		},
 	}).Info("Slack webhook response details")
 
+	// ✅ **DETECT HTML RESPONSE (Invalid endpoint)**
+	responseStr := string(body)
+	if strings.HasPrefix(responseStr, "<!DOCTYPE html") || 
+	   strings.Contains(responseStr, "<html") {
+		logrus.WithFields(logrus.Fields{
+			"response_preview": responseStr[:min(len(responseStr), 200)],
+		}).Error("🚨 Received HTML response instead of JSON - Wrong endpoint or URL issue!")
+		return fmt.Errorf("webhook returned HTML page instead of JSON response - check URL validity")
+	}
+
 	if resp.StatusCode != http.StatusOK {
 		logrus.WithFields(logrus.Fields{
 			"status_code": resp.StatusCode,
@@ -431,10 +453,9 @@ func (k *KafkaConfig) sendToSlack(webhookURL string, message helpers.SlackMessag
 		return fmt.Errorf("slack webhook returned status %d: %s", resp.StatusCode, string(body))
 	}
 
-	responseStr := string(body)
-	if strings.Contains(strings.ToLower(responseStr), "error") ||
-		strings.Contains(strings.ToLower(responseStr), "invalid") {
-		logrus.WithField("response", responseStr).Warn("Slack response contains potential error")
+	// ✅ **VALIDATE EXPECTED SLACK RESPONSE**
+	if responseStr != "ok" {
+		logrus.WithField("unexpected_response", responseStr).Warn("Unexpected Slack response format")
 	}
 
 	logrus.WithFields(logrus.Fields{
