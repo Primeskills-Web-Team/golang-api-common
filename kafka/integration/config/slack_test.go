@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Primeskills-Web-Team/golang-api-common/kafka/helpers"
 	"github.com/joho/godotenv"
 	"github.com/stretchr/testify/assert"
 )
@@ -82,7 +83,7 @@ func TestSlackAlert(t *testing.T) {
 	}
 
 	t.Run("send test alert", func(t *testing.T) {
-		err := config.sendToSlack(slackWebhook, SlackMessage{
+		err := config.sendToSlack(slackWebhook, helpers.SlackMessage{
 			Text: "Test Slack alert",
 		})
 		assert.NoError(t, err)
@@ -207,7 +208,7 @@ func TestRealSlackIntegration(t *testing.T) {
 		t.Log("🚀 Sending REAL Slack alert...")
 
 		// ✅ Send test alert
-		err := config.sendToSlack(slackWebhook, SlackMessage{
+		err := config.sendToSlack(slackWebhook, helpers.SlackMessage{
 			Text: "Test Slack alert",
 		})
 		assert.NoError(t, err)

@@ -333,7 +333,7 @@ func (k *KafkaConfig) sendSlackAlert(alert map[string]interface{}) {
 	}).Info("Preparing to send Slack alert")
 
 	// ✅ Build Slack message
-	message := k.buildSlackMessage(alert)
+	message := k.slackHelper.BuildSlackMessage(alert)
 
 	// ✅ Send to Slack
 	if err := k.sendToSlack(slackWebhook, message); err != nil {
@@ -346,115 +346,8 @@ func (k *KafkaConfig) sendSlackAlert(alert map[string]interface{}) {
 	}
 }
 
-func (k *KafkaConfig) buildSlackMessage(alert map[string]interface{}) SlackMessage {
-	severity := alert["severity"].(string)
-	topic := alert["topic"].(string)
-	errorMsg := alert["error"].(string)
-	timestamp := alert["timestamp"].(time.Time)
 
-	color := k.slackHelper.GetSlackColor(severity)
-	mainText := fmt.Sprintf("🚨 *Kafka Failure Alert* - %s", strings.ToUpper(severity))
-
-	fields := []SlackField{
-		{
-			Title: "Service",
-			Value: getEnvOrDefault("APP_NAME", "unknown-service"),
-			Short: true,
-		},
-		{
-			Title: "Environment",
-			Value: getEnvOrDefault("ENVIRONMENT", "unknown"),
-			Short: true,
-		},
-		{
-			Title: "Topic",
-			Value: topic,
-			Short: true,
-		},
-		{
-			Title: "Severity",
-			Value: strings.ToUpper(severity),
-			Short: true,
-		},
-		{
-			Title: "Kafka Hosts",
-			Value: fmt.Sprintf("%v", alert["kafka_hosts"]),
-			Short: false,
-		},
-		{
-			Title: "Timestamp",
-			Value: timestamp.Format("2006-01-02 15:04:05 MST"),
-			Short: true,
-		},
-		{
-			Title: "Alert Type",
-			Value: fmt.Sprintf("%s", alert["alert_type"]),
-			Short: true,
-		},
-	}
-
-	if eventRaw, ok := alert["event"]; ok {
-		if event, ok := eventRaw.(map[string]interface{}); ok {
-			if eventName, ok := event["event_name"].(string); ok {
-				fields = append(fields, SlackField{
-					Title: "Event Name",
-					Value: eventName,
-					Short: true,
-				})
-			}
-			if source, ok := event["source"].(string); ok {
-				fields = append(fields, SlackField{
-					Title: "Event Source",
-					Value: source,
-					Short: true,
-				})
-			}
-
-			if data, ok := event["data"]; ok {
-				if marshaled, err := json.MarshalIndent(data, "", "  "); err == nil {
-					fields = append(fields, SlackField{
-						Title: "Event Data",
-						Value: fmt.Sprintf("```\n%s\n```", marshaled),
-						Short: false,
-					})
-				}
-			}
-		}
-	}
-
-	// ✅ Error message in code block
-	errorText := fmt.Sprintf("```%s```", errorMsg)
-	if severity == "critical" {
-		errorText += "\n\n⚠️ *This is a critical alert requiring immediate attention!*"
-	}
-
-	attachment := SlackAttachment{
-		Color:     color,
-		Title:     fmt.Sprintf("Failed to publish to topic: %s", topic),
-		Text:      errorText,
-		Timestamp: timestamp.Unix(),
-		Footer:    "Kafka Alert System",
-		Fields:    fields,
-	}
-
-	return SlackMessage{
-		Text:        mainText,
-		Username:    getEnvOrDefault("SLACK_USERNAME", "Kafka Alert Bot"),
-		IconEmoji:   getEnvOrDefault("SLACK_ICON_EMOJI", ":warning:"),
-		Channel:     getEnvOrDefault("SLACK_CHANNEL", "#kafka-alerts"),
-		Attachments: []SlackAttachment{attachment},
-	}
-}
-
-// ✅ Helper function
-func getEnvOrDefault(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
-}
-
-func (k *KafkaConfig) sendToSlack(webhookURL string, message SlackMessage) error {
+func (k *KafkaConfig) sendToSlack(webhookURL string, message helpers.SlackMessage) error {
 	// ✅ Marshal message to JSON
 	jsonData, err := json.Marshal(message)
 	if err != nil {
